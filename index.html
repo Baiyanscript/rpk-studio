@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RPK Studio — 解析与改包</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark"></span>
+    <span class="brand-name">RPK Studio</span>
+  </div>
+  <div class="topbar-right">
+    <span class="dot-ok"></span>
+    <span>全部处理在本机完成</span>
+  </div>
+</header>
+
+<main class="page">
+
+  <section class="hero">
+    <h1>解析、修改、重新签名</h1>
+    <p>读 Vela 发布版 RPK 的结构与签名，改应用信息后重打包，输出可直接安装的包。</p>
+  </section>
+
+  <div class="grid">
+
+    <section class="card col-left">
+      <div class="card-head">
+        <h2>源文件</h2>
+        <span class="muted" id="srcState">未选择</span>
+      </div>
+
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="选择 RPK 文件">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/>
+          <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+        </svg>
+        <strong>拖入 .rpk 文件</strong>
+        <span>或点击选择</span>
+        <input type="file" id="fileInput" accept=".rpk,.bin,.zip" hidden>
+      </div>
+
+      <div class="file-row hidden" id="fileRow">
+        <div class="file-badge">RPK</div>
+        <div class="file-text">
+          <div class="file-name" id="fileName"></div>
+          <div class="muted small" id="fileMeta"></div>
+        </div>
+        <button class="link" id="changeFile" type="button">更换</button>
+      </div>
+
+      <div class="card-head sub">
+        <h2>应用信息</h2>
+        <span class="muted" id="editState">未载入</span>
+      </div>
+
+      <div class="form">
+        <label class="field">
+          <span>应用名称</span>
+          <input id="fName" disabled placeholder="载入后自动填充">
+        </label>
+        <label class="field">
+          <span>包名</span>
+          <input id="fPackage" disabled spellcheck="false" placeholder="载入后自动填充">
+        </label>
+        <div class="row">
+          <label class="field">
+            <span>版本名</span>
+            <input id="fVersionName" disabled placeholder="载入后自动填充">
+          </label>
+          <label class="field">
+            <span>版本号</span>
+            <input id="fVersionCode" type="number" disabled placeholder="载入后自动填充">
+          </label>
+        </div>
+
+        <div class="icon-row">
+          <div class="icon-preview" id="iconPreview"><span>无</span></div>
+          <div class="icon-text">
+            <div class="label">应用图标</div>
+            <div class="muted small" id="iconHint">100 × 100 PNG</div>
+          </div>
+          <button class="link" id="pickIcon" type="button" disabled>替换</button>
+          <input type="file" id="imageInput" accept="image/png,image/jpeg,image/webp" hidden>
+        </div>
+      </div>
+    </section>
+
+    <section class="card col-right">
+      <div class="card-head">
+        <h2>包信息</h2>
+        <span class="badge idle" id="signBadge">等待文件</span>
+      </div>
+
+      <dl class="kv" id="kv">
+        <div class="kv-empty">选择一个 RPK 文件后显示</div>
+      </dl>
+
+      <div class="verify hidden" id="verify"></div>
+      <div class="notice hidden" id="embedNotice"></div>
+
+      <div class="card-head sub">
+        <div class="tabs">
+          <button class="tab is-on" id="tabFiles" type="button">包内文件</button>
+          <button class="tab" id="tabImages" type="button">图片资源<em id="imgCount"></em></button>
+        </div>
+        <div class="list-tools">
+          <input class="list-search" id="fileSearch" placeholder="筛选路径" spellcheck="false" disabled>
+          <button class="link hidden" id="exportImages" type="button">导出全部</button>
+          <span class="muted" id="entryCount">—</span>
+        </div>
+      </div>
+
+      <div class="file-list" id="fileList">
+        <div class="list-empty">—</div>
+      </div>
+      <div class="image-grid hidden" id="imageGrid"></div>
+    </section>
+
+  </div>
+
+  <section class="card actionbar">
+    <div class="identity-block">
+      <div class="card-head"><h2>签名身份</h2><span class="muted" id="idState">未设置</span></div>
+      <div class="identity">
+        <input id="cnInput" placeholder="证书名称，例如 Zhang San" spellcheck="false">
+        <button class="ghost" id="genId" type="button">生成新身份</button>
+        <button class="ghost" id="loadKey" type="button">用已有私钥</button>
+        <input type="file" id="keyInput" accept=".pem,.key,.txt" hidden>
+        <input type="file" id="certInput" accept=".pem,.crt,.txt" hidden>
+      </div>
+      <div class="id-detail" id="idDetail">生成一对 RSA-2048 密钥并自签证书，或用 openssl 生成的 private.pem。</div>
+    </div>
+    <div class="action-right">
+      <button class="ghost" id="exportJson" type="button" disabled>导出信息</button>
+      <button class="primary" id="exportBtn" type="button" disabled>导出 RPK</button>
+    </div>
+  </section>
+
+  <div class="log" id="log" aria-live="polite"></div>
+
+  <p class="foot">改包会更换签名。与原手机端配对的应用（带同步器、依赖互联通信的快应用）在换签名或改包名后可能无法通信。若原项目使用 AGPL 等协议，分发修改版需要同样开源。</p>
+
+</main>
+
+<script src="assets/bundle.js" defer></script>
+</body>
+</html>
