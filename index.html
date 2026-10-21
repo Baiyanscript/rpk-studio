@@ -2,19 +2,21 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>RPK Studio — 解析与改包</title>
+<link rel="icon" href="data:,">
+<meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 
 <header class="topbar">
   <div class="brand">
-    <span class="mark"></span>
     <span class="brand-name">RPK Studio</span>
+    <span class="brand-sub">Vela 包工具</span>
   </div>
   <div class="topbar-right">
-    <span class="dot-ok"></span>
+    <span class="dot-ok" aria-hidden="true"></span>
     <span>全部处理在本机完成</span>
   </div>
 </header>
@@ -35,7 +37,7 @@
       </div>
 
       <div class="drop" id="drop" tabindex="0" role="button" aria-label="选择 RPK 文件">
-        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/>
           <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
         </svg>
@@ -96,29 +98,27 @@
         <span class="badge idle" id="signBadge">等待文件</span>
       </div>
 
-      <dl class="kv" id="kv">
-        <div class="kv-empty">选择一个 RPK 文件后显示</div>
-      </dl>
+      <dl class="kv" id="kv"></dl>
 
       <div class="verify hidden" id="verify"></div>
       <div class="notice hidden" id="embedNotice"></div>
 
       <div class="card-head sub">
-        <div class="tabs">
-          <button class="tab is-on" id="tabFiles" type="button">包内文件</button>
-          <button class="tab" id="tabImages" type="button">图片资源<em id="imgCount"></em></button>
+        <div class="tabs" role="tablist">
+          <button class="tab is-on" id="tabFiles" type="button" role="tab" aria-selected="true">包内文件</button>
+          <button class="tab" id="tabImages" type="button" role="tab" aria-selected="false">图片资源<em id="imgCount"></em></button>
         </div>
         <div class="list-tools">
-          <input class="list-search" id="fileSearch" placeholder="筛选路径" spellcheck="false" disabled>
+          <input class="list-search" id="fileSearch" placeholder="筛选路径" spellcheck="false" disabled aria-label="筛选">
           <button class="link hidden" id="exportImages" type="button">导出全部</button>
           <span class="muted" id="entryCount">—</span>
         </div>
       </div>
 
-      <div class="file-list" id="fileList">
+      <div class="file-list is-empty" id="fileList" role="tabpanel">
         <div class="list-empty">—</div>
       </div>
-      <div class="image-grid hidden" id="imageGrid"></div>
+      <div class="image-grid is-empty hidden" id="imageGrid" role="tabpanel"></div>
     </section>
 
   </div>
@@ -127,11 +127,10 @@
     <div class="identity-block">
       <div class="card-head"><h2>签名身份</h2><span class="muted" id="idState">未设置</span></div>
       <div class="identity">
-        <input id="cnInput" placeholder="证书名称，例如 Zhang San" spellcheck="false">
+        <input id="cnInput" placeholder="证书名称，例如 Zhang San" spellcheck="false" aria-label="证书名称">
         <button class="ghost" id="genId" type="button">生成新身份</button>
         <button class="ghost" id="loadKey" type="button">用已有私钥</button>
         <input type="file" id="keyInput" accept=".pem,.key,.txt" hidden>
-        <input type="file" id="certInput" accept=".pem,.crt,.txt" hidden>
       </div>
       <div class="id-detail" id="idDetail">生成一对 RSA-2048 密钥并自签证书，或用 openssl 生成的 private.pem。</div>
     </div>
@@ -146,6 +145,51 @@
   <p class="foot">改包会更换签名。与原手机端配对的应用（带同步器、依赖互联通信的快应用）在换签名或改包名后可能无法通信。若原项目使用 AGPL 等协议，分发修改版需要同样开源。</p>
 
 </main>
+
+<!-- 图片调整 -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <header class="modal-head">
+      <div>
+        <h3 id="mTitle">调整图片</h3>
+        <p class="modal-sub" id="mSub">—</p>
+      </div>
+      <button class="icon-btn" id="mClose" type="button" aria-label="关闭">✕</button>
+    </header>
+
+    <div class="modal-body">
+      <div class="stage" id="mStage" aria-label="预览">
+        <canvas id="mCanvas"></canvas>
+        <div class="stage-tip" id="mTip">按住拖动可调整位置</div>
+      </div>
+
+      <aside class="modal-side">
+        <div class="seg" id="mModes" role="tablist">
+          <button type="button" data-mode="fit" class="is-on" role="tab" aria-selected="true">适配</button>
+          <button type="button" data-mode="cover" role="tab" aria-selected="false">裁剪</button>
+          <button type="button" data-mode="stretch" role="tab" aria-selected="false">拉伸</button>
+          <button type="button" data-mode="raw" role="tab" aria-selected="false">原尺寸</button>
+        </div>
+        <p class="hint" id="mHint">整张图缩放到目标尺寸内，四周补透明。</p>
+
+        <div class="slider-row" id="mZoomRow">
+          <div class="slider-head"><span>缩放</span><em id="mZoomVal">100%</em></div>
+          <input type="range" id="mZoom" min="20" max="400" step="1" value="100" aria-label="缩放">
+        </div>
+
+        <dl class="mini-kv" id="mInfo"></dl>
+      </aside>
+    </div>
+
+    <footer class="modal-foot">
+      <button class="ghost" id="mPick" type="button">换一张</button>
+      <div class="foot-right">
+        <button class="ghost" id="mCancel" type="button">取消</button>
+        <button class="primary" id="mApply" type="button">应用</button>
+      </div>
+    </footer>
+  </div>
+</div>
 
 <script src="assets/bundle.js" defer></script>
 </body>
