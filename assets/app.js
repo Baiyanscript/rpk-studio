@@ -11,13 +11,15 @@ const S = {
   urls: new Map(),   // name -> objectURL
   tab: 'files',
   fileName: '',
-  pendingImage: null,
+  busy: false,
+  pending: null,
 };
 
 /* ---------- 工具 ---------- */
 
 const fmtSize = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
 const hexUpper = bytes => [...bytes].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 function log(text, cls = '') {
   const el = document.createElement('div');
@@ -25,9 +27,10 @@ function log(text, cls = '') {
   el.textContent = text;
   $('log').appendChild(el);
   while ($('log').children.length > 14) $('log').firstChild.remove();
+  $('log').scrollTop = $('log').scrollHeight;
 }
 
-function clearLog() { $('log').textContent = ''; }
+const clearLog = () => { $('log').textContent = ''; };
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -45,16 +48,8 @@ function download(name, bytes) {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
-function entryByName(name) {
-  return S.pkg?.entries.find(e => e.name === name) || null;
-}
-
-function imageBytes(name) {
-  if (S.images[name]) return S.images[name];
-  const e = entryByName(name);
-  return e ? dataOf(e) : null;
-}
-
+const entryByName = name => S.pkg?.entries.find(e => e.name === name) || null;
+const imageBytes = name => S.images[name] || (entryByName(name) ? dataOf(entryByName(name)) : null);
 const iconName = () => (S.pkg?.manifest?.icon || '/common/icon.png').replace(/^\//, '');
 
 /* ---------- 渲染 ---------- */
@@ -70,7 +65,7 @@ function renderForm() {
   const on = Boolean(m);
   for (const id of ['fName', 'fPackage', 'fVersionName', 'fVersionCode']) $(id).disabled = !on;
   $('pickIcon').disabled = !on;
-  $('exportBtn').disabled = !on || !S.identity;
+  $('exportBtn').disabled = !on || !S.identity || S.busy;
   $('exportJson').disabled = !on;
   if (!m) return;
 
@@ -104,24 +99,20 @@ function renderKV() {
   }
   const { manifest, entries, bytes, sig } = S.pkg;
   const pages = manifest?.router?.pages ? Object.keys(manifest.router.pages).length : 0;
-  const files = entries.filter(e => !e.isDir).length;
-
   const rows = [
     ['包名', manifest?.package || '—'],
     ['应用名', manifest?.name || '—'],
     ['版本', `${manifest?.versionName || '—'}`],
     ['版本号', String(manifest?.versionCode ?? '—')],
     ['页面', String(pages)],
-    ['文件', String(files)],
+    ['文件', String(entries.filter(e => !e.isDir).length)],
     ['体积', fmtSize(bytes.length)],
     ['平台版本', String(manifest?.minPlatformVersion ?? '—')],
   ];
-
   for (const [k, v] of rows) {
     kv.appendChild(el('dt', null, k));
     kv.appendChild(el('dd', null, v));
   }
-
   kv.appendChild(el('dt', null, '签名'));
   kv.appendChild(el('dd', null, sig.present ? `RSA-${sig.signature.length * 8}` : '无'));
   kv.appendChild(el('dt', null, '摘要'));
@@ -147,7 +138,6 @@ function renderVerify() {
     row.appendChild(el('b', null, right));
     box.appendChild(row);
   };
-
   line('分段摘要', v.digestOk, v.digestOk ? '一致' : '不一致');
   line('RSA 签名', v.rsaOk, v.rsaOk ? '有效' : '无效');
   line('文件摘要', v.badFiles === 0, `${v.fileCount - v.badFiles} / ${v.fileCount}`);
@@ -176,8 +166,7 @@ function renderEmbed() {
   const embedPkg = (text.match(/"package":"([^"]*)"/) || [])[1] || '';
 
   box.classList.remove('hidden');
-  box.innerHTML = '';
-
+  box.textContent = '';
   if (pkg.embedded.jsc) {
     box.appendChild(el('div', null,
       `包内 ${pkg.embedded.source} 是 JSC 字节码，其中另存了一份编译时的 manifest。改包名或版本只改外层 manifest.json，握手指令仍会读字节码里的旧值。`));
@@ -207,7 +196,7 @@ function renderFiles() {
   const frag = document.createDocumentFragment();
   for (const e of entries) {
     const row = el('div', 'entry');
-    row.appendChild(el('span', `entry-name${e.isDir ? ' entry-dir' : ''}`, e.name));
+    row.appendChild(el('span', `entry-name${e.isDir ? ' entry-dim' : ''}`, e.name));
     row.appendChild(el('span', 'entry-size', e.isDir ? '—' : fmtSize(dataOf(e).length)));
     if (!e.isDir) {
       const btn = el('button', null, '取出');
@@ -220,6 +209,49 @@ function renderFiles() {
     frag.appendChild(row);
   }
   list.appendChild(frag);
+}
+
+function makeThumb(img) {
+  const changed = Boolean(S.images[img.name]);
+  const bytes = imageBytes(img.name);
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+  S.urls.set(img.name, url);
+
+  const box = el('article', `thumb${changed ? ' is-changed' : ''}`);
+  box.dataset.name = img.name;
+
+  const frame = el('div', 'thumb-img');
+  const im = new Image();
+  im.src = url;
+  im.alt = '';
+  im.loading = 'lazy';
+  frame.appendChild(im);
+
+  box.append(frame,
+    el('div', 'thumb-name', img.name.split('/').pop()),
+    el('div', 'thumb-meta', img.w ? `${img.w}×${img.h}` : fmtSize(img.bytes)));
+
+  if (changed) box.appendChild(el('span', 'thumb-dot'));
+
+  const ops = el('div', 'thumb-ops');
+  const mk = (act, label) => {
+    const b = el('button', null, label);
+    b.type = 'button';
+    b.dataset.act = act;
+    b.onclick = ev => {
+      ev.stopPropagation();
+      if (act === 'replace') pickForImage(img.name);
+      else if (act === 'adjust') openEditor(img.name);
+      else revertImage(img.name);
+    };
+    return b;
+  };
+  ops.append(mk('replace', '替换'), mk('adjust', '调整'));
+  if (changed) ops.append(mk('revert', '还原'));
+  box.appendChild(ops);
+
+  box.onclick = () => openEditor(img.name);
+  return box;
 }
 
 function renderImages() {
@@ -246,66 +278,35 @@ function renderImages() {
   S.urls.clear();
 
   const frag = document.createDocumentFragment();
-  for (const img of list) {
-    const bytes = imageBytes(img.name);
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
-    S.urls.set(img.name, url);
-
-    const box = el('div', 'thumb');
-    const frame = el('div', 'thumb-img');
-    const im = new Image();
-    im.src = url;
-    im.loading = 'lazy';
-    im.alt = '';
-    frame.appendChild(im);
-
-    box.appendChild(frame);
-    box.appendChild(el('div', 'thumb-name', img.name.split('/').pop()));
-    box.appendChild(el('div', 'thumb-meta', img.w ? `${img.w}×${img.h}` : fmtSize(img.bytes)));
-
-    if (S.images[img.name]) box.appendChild(el('span', 'thumb-dot'));
-    box.title = `${img.name} · 点击替换`;
-    box.onclick = () => { S.pendingImage = img.name; $('imageInput').click(); };
-
-    const acts = el('div', 'thumb-acts');
-    const btn = el('button', null, '替换');
-    btn.type = 'button';
-    btn.onclick = e => { e.stopPropagation(); S.pendingImage = img.name; $('imageInput').click(); };
-    acts.appendChild(btn);
-
-    if (S.images[img.name]) {
-      const back = el('button', null, '还原');
-      back.type = 'button';
-      back.onclick = e => {
-        e.stopPropagation();
-        delete S.images[img.name];
-        log(`已还原 ${img.name}`);
-        renderImages();
-        renderForm();
-        renderDirty();
-      };
-      acts.appendChild(back);
-    }
-    box.appendChild(acts);
-    frag.appendChild(box);
-  }
+  for (const img of list) frag.appendChild(makeThumb(img));
   grid.appendChild(frag);
+}
+
+function updateThumb(name) {
+  const grid = $('imageGrid');
+  const meta = S.pkg.images.find(i => i.name === name);
+  if (!meta) return;
+  const old = grid.querySelector(`.thumb[data-name="${CSS.escape(name)}"]`);
+  if (!old) { renderImages(); return; }
+  const url = S.urls.get(name);
+  if (url) URL.revokeObjectURL(url);
+  const fresh = makeThumb(meta);
+  old.replaceWith(fresh);
+  if (meta.name === iconName()) renderForm();
 }
 
 function renderDirty() {
   const m = S.pkg?.manifest;
   if (!m) { $('editState').textContent = '未载入'; return; }
-  const changedImages = Object.keys(S.images).length;
+  const n = Object.keys(S.images).length;
   const diff =
     $('fName').value !== (m.name || '') ||
     $('fPackage').value !== (m.package || '') ||
     $('fVersionName').value !== (m.versionName || '') ||
     Number($('fVersionCode').value) !== Number(m.versionCode) ||
-    changedImages > 0;
-  $('editState').textContent = diff
-    ? (changedImages ? `已修改 · ${changedImages} 张图` : '已修改')
-    : '未修改';
-  $('exportBtn').disabled = !S.identity || !S.pkg;
+    n > 0;
+  $('editState').textContent = diff ? (n ? `已修改 · ${n} 张图` : '已修改') : '未修改';
+  $('exportBtn').disabled = !S.identity || !S.pkg || S.busy;
 }
 
 function renderIdentity() {
@@ -329,6 +330,8 @@ function setTab(tab) {
   const files = tab === 'files';
   $('tabFiles').classList.toggle('is-on', files);
   $('tabImages').classList.toggle('is-on', !files);
+  $('tabFiles').setAttribute('aria-selected', String(files));
+  $('tabImages').setAttribute('aria-selected', String(!files));
   $('fileList').classList.toggle('hidden', !files);
   $('imageGrid').classList.toggle('hidden', files);
   $('exportImages').classList.toggle('hidden', files || !S.pkg);
@@ -341,71 +344,293 @@ function setTab(tab) {
   }
 }
 
-/* ---------- 图片替换 ---------- */
+/* ---------- 图片编辑器 ---------- */
 
-async function rasterize(file, W, H) {
-  const bmp = await createImageBitmap(file);
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  const s = Math.min(W / bmp.width, H / bmp.height);
-  const w = Math.max(1, Math.round(bmp.width * s));
-  const h = Math.max(1, Math.round(bmp.height * s));
-  ctx.drawImage(bmp, Math.round((W - w) / 2), Math.round((H - h) / 2), w, h);
-  const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-  return { bytes: new Uint8Array(await blob.arrayBuffer()), srcW: bmp.width, srcH: bmp.height };
+const Ed = {
+  name: '', img: null, iw: 0, ih: 0, W: 0, H: 0,
+  mode: 'fit', zoom: 1, dx: 0, dy: 0, drag: null, file: null,
+};
+
+const HINTS = {
+  fit: '整张图缩放到目标尺寸内，四周补透明。',
+  cover: '等比放大铺满目标尺寸，拖动选位置。',
+  stretch: '直接拉伸到目标尺寸，比例会变形。',
+  raw: '保留原始像素，不缩放不裁剪；尺寸与目标不同时由设备拉伸。',
+};
+
+function openEditor(name) {
+  const meta = S.pkg?.images.find(i => i.name === name);
+  if (!meta) return;
+  const bytes = imageBytes(name);
+  const blob = new Blob([bytes], { type: 'image/png' });
+  const url = URL.createObjectURL(blob);
+
+  Ed.name = name;
+  Ed.W = meta.w || 0;
+  Ed.H = meta.h || 0;
+  Ed.file = null;
+  Ed.mode = 'fit';
+  Ed.zoom = 1;
+
+  const img = new Image();
+  img.onload = () => {
+    Ed.img = img;
+    Ed.iw = img.naturalWidth;
+    Ed.ih = img.naturalHeight;
+    if (!Ed.W) { Ed.W = Ed.iw; Ed.H = Ed.ih; }
+    $('mSub').textContent = name;
+    $('mTitle').textContent = '调整图片';
+    setMode('fit');
+    $('modal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    $('mClose').focus();
+  };
+  img.onerror = () => log('图片解码失败', 'err');
+  img.src = url;
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-async function replaceImage(name, file) {
-  const target = S.pkg.images.find(i => i.name === name);
-  const W = target?.w || 0;
-  const H = target?.h || 0;
+function pickForImage(name) {
+  S.pending = { type: 'image', name };
+  $('imageInput').click();
+}
+
+function revertImage(name) {
+  if (!S.images[name]) return;
+  delete S.images[name];
+  log(`已还原 ${name}`);
+  updateThumb(name);
+  renderDirty();
+}
+
+function setMode(mode) {
+  Ed.mode = mode;
+  for (const b of $('mModes').children) {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-selected', String(on));
+  }
+  $('mHint').textContent = HINTS[mode];
+  $('mZoomRow').style.display = (mode === 'stretch' || mode === 'raw') ? 'none' : '';
+  $('mTip').textContent = mode === 'cover' ? '按住拖动可调整位置' : (mode === 'raw' ? '保持原始像素' : '');
+  $('mZoom').min = mode === 'fit' ? 10 : 100;
+  $('mZoom').max = mode === 'fit' ? 100 : 400;
+  Ed.zoom = mode === 'fit' ? 1 : Math.max(1, Ed.zoom);
+  $('mZoom').value = Math.round(Ed.zoom * 100);
+  $('mZoomVal').textContent = `${Math.round(Ed.zoom * 100)}%`;
+  Ed.dx = 0;
+  Ed.dy = 0;
+  draw();
+}
+
+function draw() {
+  const cv = $('mCanvas');
+  if (!Ed.img) return;
+  const W = Ed.W, H = Ed.H;
+  const raw = Ed.mode === 'raw';
+  cv.width = raw ? Ed.iw : W;
+  cv.height = raw ? Ed.ih : H;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  if (raw) {
+    ctx.drawImage(Ed.img, 0, 0);
+    updateInfo(cv.width, cv.height, Ed.iw, Ed.ih);
+    scaleCanvas();
+    return;
+  }
+
+  if (Ed.mode === 'stretch') {
+    ctx.drawImage(Ed.img, 0, 0, W, H);
+    updateInfo(W, H, Ed.iw, Ed.ih);
+    scaleCanvas();
+    return;
+  }
+
+  const base = Ed.mode === 'fit' ? Math.min(W / Ed.iw, H / Ed.ih) : Math.max(W / Ed.iw, H / Ed.ih);
+  const s = base * Ed.zoom;
+  const dw = Ed.iw * s, dh = Ed.ih * s;
+  let dx = (W - dw) / 2 + Ed.dx;
+  let dy = (H - dh) / 2 + Ed.dy;
+
+  if (Ed.mode === 'cover') {
+    dx = clamp(dx, W - dw, 0);
+    dy = clamp(dy, H - dh, 0);
+    Ed.dx = dx - (W - dw) / 2;
+    Ed.dy = dy - (H - dh) / 2;
+  }
+  ctx.drawImage(Ed.img, dx, dy, dw, dh);
+  updateInfo(W, H, Ed.iw, Ed.ih);
+  scaleCanvas();
+}
+
+function scaleCanvas() {
+  const cv = $('mCanvas');
+  const stage = $('mStage');
+  const availW = stage.clientWidth - 32;
+  const availH = stage.clientHeight - 32;
+  if (!availW || !availH || !cv.width) return;
+  const k = Math.min(availW / cv.width, availH / cv.height, 6);
+  cv.style.width = `${Math.round(cv.width * k)}px`;
+  cv.style.height = `${Math.round(cv.height * k)}px`;
+  cv.style.imageRendering = k >= 3 ? 'pixelated' : 'auto';
+}
+
+function updateInfo(outW, outH, srcW, srcH) {
+  const kv = $('mInfo');
+  kv.textContent = '';
+  const rows = [
+    ['目标', `${Ed.W} × ${Ed.H}`],
+    ['原图', `${srcW} × ${srcH}`],
+    ['输出', `${outW} × ${outH}`],
+  ];
+  for (const [k, v] of rows) {
+    kv.appendChild(el('dt', null, k));
+    kv.appendChild(el('dd', null, v));
+  }
+}
+
+async function applyEditor() {
+  if (!Ed.img) return;
+  const btn = $('mApply');
+  btn.classList.add('is-loading');
+  btn.disabled = true;
+  await new Promise(r => setTimeout(r, 16));
 
   try {
     let bytes;
-    let note;
-    if (file.type === 'image/png' && W && H) {
-      const bmp = await createImageBitmap(file);
-      if (bmp.width === W && bmp.height === H) {
-        bytes = new Uint8Array(await file.arrayBuffer());
-        note = `${W}×${H} 原样写入`;
-      } else {
-        const r = await rasterize(file, W, H);
-        bytes = r.bytes;
-        note = `${r.srcW}×${r.srcH} → ${W}×${H} 等比缩放`;
-      }
-    } else if (W && H) {
-      const r = await rasterize(file, W, H);
-      bytes = r.bytes;
-      note = `${r.srcW}×${r.srcH} → ${W}×${H} 等比缩放（转 PNG）`;
+    const cv = $('mCanvas');
+    if (Ed.mode === 'raw' && Ed.file && Ed.file.type === 'image/png') {
+      bytes = new Uint8Array(await Ed.file.arrayBuffer());
     } else {
-      bytes = new Uint8Array(await file.arrayBuffer());
-      note = '无原始尺寸，按原字节写入';
+      const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+      bytes = new Uint8Array(await blob.arrayBuffer());
     }
-
-    const before = imageBytes(name)?.length || 0;
-    S.images[name] = bytes;
-    log(`替换 ${name} · ${note} · ${fmtSize(before)} → ${fmtSize(bytes.length)}`, 'done');
-    renderImages();
-    renderForm();
+    const before = imageBytes(Ed.name)?.length || 0;
+    S.images[Ed.name] = bytes;
+    log(`应用 ${Ed.name} · ${Ed.mode} · ${cv.width}×${cv.height} · ${fmtSize(before)} → ${fmtSize(bytes.length)}`, 'done');
+    closeEditor();
+    updateThumb(Ed.name);
     renderDirty();
-  } catch (err) {
-    log(`图片处理失败：${err.message || err}`, 'err');
+  } catch (e) {
+    log(`处理失败：${e.message || e}`, 'err');
+  } finally {
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
   }
 }
+
+function closeEditor() {
+  $('modal').hidden = true;
+  document.body.style.overflow = '';
+  Ed.img = null;
+}
+
+async function loadIntoEditor(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    Ed.img = img;
+    Ed.iw = img.naturalWidth;
+    Ed.ih = img.naturalHeight;
+    Ed.file = file;
+    if (!Ed.W || !Ed.H) { Ed.W = Ed.iw; Ed.H = Ed.ih; }
+    Ed.zoom = 1;
+    Ed.dx = 0;
+    Ed.dy = 0;
+    $('mTitle').textContent = '调整图片';
+    $('mSub').textContent = `${Ed.name} · 新图 ${Ed.iw}×${Ed.ih}`;
+    $('modal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    const ratio = Ed.ih / Ed.iw;
+    const target = Ed.W / Ed.H;
+    setMode(Math.abs(ratio - target) < 0.02 ? 'fit' : 'cover');
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+  img.onerror = () => { log('无法解码这张图片', 'err'); URL.revokeObjectURL(url); };
+  img.src = url;
+}
+
+/* 拖动 / 缩放 */
+(function bindStage() {
+  const stage = $('mStage');
+  const cv = $('mCanvas');
+
+  const pos = e => ({ x: e.clientX, y: e.clientY });
+
+  stage.addEventListener('pointerdown', e => {
+    if (Ed.mode !== 'cover' || !Ed.img) return;
+    stage.setPointerCapture(e.pointerId);
+    stage.classList.add('is-dragging');
+    Ed.drag = { ...pos(e), dx: Ed.dx, dy: Ed.dy };
+  });
+
+  stage.addEventListener('pointermove', e => {
+    if (!Ed.drag) return;
+    const p = pos(e);
+    const scale = cv.width / cv.getBoundingClientRect().width;
+    Ed.dx = Ed.drag.dx + (p.x - Ed.drag.x) * scale;
+    Ed.dy = Ed.drag.dy + (p.y - Ed.drag.y) * scale;
+    draw();
+  });
+
+  const end = e => {
+    if (!Ed.drag) return;
+    Ed.drag = null;
+    stage.classList.remove('is-dragging');
+    if (e && stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+    draw();
+  };
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+
+  stage.addEventListener('wheel', e => {
+    if (Ed.mode !== 'cover' && Ed.mode !== 'fit') return;
+    e.preventDefault();
+    $('mZoom').value = clamp(Number($('mZoom').value) - Math.sign(e.deltaY) * 5, Number($('mZoom').min), Number($('mZoom').max));
+    $('mZoom').dispatchEvent(new Event('input'));
+  }, { passive: false });
+
+  $('mZoom').addEventListener('input', e => {
+    Ed.zoom = Number(e.target.value) / 100;
+    $('mZoomVal').textContent = `${Math.round(Ed.zoom * 100)}%`;
+    draw();
+  });
+
+  $('mModes').addEventListener('click', e => {
+    const b = e.target.closest('button[data-mode]');
+    if (b) setMode(b.dataset.mode);
+  });
+
+  $('mClose').onclick = closeEditor;
+  $('mCancel').onclick = closeEditor;
+  $('mApply').onclick = applyEditor;
+
+  $('mPick').onclick = () => {
+    S.pending = { type: 'image', name: Ed.name, fromEditor: true };
+    $('imageInput').click();
+  };
+
+  $('modal').addEventListener('click', e => {
+    if (e.target === $('modal')) closeEditor();
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !$('modal').hidden) closeEditor();
+  });
+})();
 
 /* ---------- 读文件 ---------- */
 
 async function loadFile(file) {
+  if (S.busy) return;
   clearLog();
+  S.busy = true;
   $('srcState').textContent = '读取中';
   log(`读取 ${file.name} · ${fmtSize(file.size)}`);
-  const buf = new Uint8Array(await file.arrayBuffer());
 
   try {
+    const buf = new Uint8Array(await file.arrayBuffer());
     const t0 = performance.now();
     const pkg = await inspect(buf);
     S.pkg = pkg;
@@ -438,6 +663,9 @@ async function loadFile(file) {
     $('srcState').textContent = '读取失败';
     setBadge('bad', '无法解析');
     log(String(err.message || err), 'err');
+  } finally {
+    S.busy = false;
+    renderDirty();
   }
 }
 
@@ -472,14 +700,18 @@ function validate(m) {
 }
 
 async function doExport() {
-  if (!S.pkg || !S.identity) return;
+  if (!S.pkg || !S.identity || S.busy) return;
   const patch = collectPatch();
   const err = validate(patch.manifest);
   if (err) { log(err, 'err'); return; }
 
-  $('exportBtn').disabled = true;
+  S.busy = true;
+  const btn = $('exportBtn');
+  btn.classList.add('is-loading');
+  btn.disabled = true;
   const t0 = performance.now();
   const before = S.pkg.bytes.length;
+
   try {
     log(`重算摘要并签名 · ${patch.manifest.package}`);
     const out = await repack(S.pkg, patch, S.identity);
@@ -499,14 +731,19 @@ async function doExport() {
   } catch (e) {
     log(`导出失败：${e.message || e}`, 'err');
   } finally {
-    $('exportBtn').disabled = false;
+    S.busy = false;
+    btn.classList.remove('is-loading');
+    renderDirty();
+    renderForm();
   }
 }
 
 /* ---------- 事件 ---------- */
 
 $('drop').addEventListener('click', () => $('fileInput').click());
-$('drop').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') $('fileInput').click(); });
+$('drop').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('fileInput').click(); }
+});
 
 document.addEventListener('dragover', e => {
   e.preventDefault();
@@ -524,8 +761,8 @@ document.addEventListener('drop', e => {
 
 $('fileInput').addEventListener('change', e => {
   const f = e.target.files?.[0];
-  if (f) loadFile(f);
   e.target.value = '';
+  if (f) loadFile(f);
 });
 
 $('changeFile').addEventListener('click', () => $('fileInput').click());
@@ -537,22 +774,26 @@ for (const id of ['fName', 'fPackage', 'fVersionName', 'fVersionCode']) {
 $('tabFiles').addEventListener('click', () => setTab('files'));
 $('tabImages').addEventListener('click', () => setTab('images'));
 $('fileSearch').addEventListener('input', () => {
-  if (S.tab === 'files') renderFiles();
-  else renderImages();
+  if (S.tab === 'files') renderFiles(); else renderImages();
 });
 
-$('pickIcon').addEventListener('click', () => {
-  S.pendingImage = iconName();
-  $('imageInput').click();
-});
+$('pickIcon').addEventListener('click', () => pickForImage(iconName()));
 
 $('imageInput').addEventListener('change', async e => {
   const f = e.target.files?.[0];
   e.target.value = '';
-  const name = S.pendingImage;
-  S.pendingImage = null;
-  if (!f || !name) return;
-  await replaceImage(name, f);
+  const pending = S.pending;
+  S.pending = null;
+  if (!f || !pending) return;
+
+  const meta = S.pkg.images.find(i => i.name === pending.name);
+  if (!meta) return;
+
+  Ed.name = pending.name;
+  Ed.W = meta.w || 0;
+  Ed.H = meta.h || 0;
+  if (!Ed.W) { log('该文件没有可识别的尺寸，按原样写入', 'err'); }
+  await loadIntoEditor(f);
 });
 
 $('exportImages').addEventListener('click', () => {
@@ -566,7 +807,9 @@ $('exportImages').addEventListener('click', () => {
 
 $('genId').addEventListener('click', async () => {
   const cn = $('cnInput').value.trim() || 'Vela App';
-  $('genId').disabled = true;
+  const btn = $('genId');
+  btn.disabled = true;
+  btn.classList.add('is-loading');
   $('idState').textContent = '生成中';
   try {
     const id = await createIdentity(cn, 3650);
@@ -578,7 +821,8 @@ $('genId').addEventListener('click', async () => {
     log(`生成失败：${e.message || e}`, 'err');
     $('idState').textContent = '未设置';
   } finally {
-    $('genId').disabled = false;
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
   }
 });
 
