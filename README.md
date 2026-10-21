@@ -2,7 +2,10 @@
 
 浏览器里解析、修改并重新签名 Vela 发布版 RPK。全部计算在本机完成，文件不上传。
 
-在线使用：**https://hrk666666.github.io/rpk-studio/**
+在线使用：
+
+- 默认版（纯色 + 毛玻璃，跟随系统深浅色）：**https://hrk666666.github.io/rpk-studio/**
+- Material Design 3 版：**https://hrk666666.github.io/rpk-studio/md3/**
 
 格式与签名机制的实测记录见 [docs/rpk-format.md](docs/rpk-format.md)。
 
@@ -53,12 +56,16 @@ python3 -m http.server 8123
 ## 目录
 
 ```
-index.html          页面
-assets/style.css    样式
-assets/app.js       界面逻辑（源码）
-assets/rpk.js       签名块解析 / 生成、X.509 自签、重打包
-assets/zip.js       ZIP 读写（基于 fflate）
-assets/bundle.js    上面三个文件的打包产物，页面实际加载它
+index.html          默认版页面
+assets/style.css    默认版样式（纯色 + 毛玻璃，含深色模式）
+assets/app.js       默认版界面逻辑（源码）
+assets/rpk.js       签名块解析 / 生成、X.509 自签、重打包（两版共用）
+assets/zip.js       ZIP 读写（基于 fflate，两版共用）
+assets/bundle.js    默认版的打包产物，页面实际加载它
+md3/index.html      Material Design 3 版页面
+md3/md3.css         M3 tokens 与组件
+md3/md3.js          M3 版逻辑
+md3/bundle.js       M3 版打包产物
 vendor/fflate.js    DEFLATE 实现
 ```
 
@@ -66,7 +73,8 @@ vendor/fflate.js    DEFLATE 实现
 
 ```bash
 npm i
-npm run build
+npm run build     # 默认版
+npm run build:md3 # M3 版
 ```
 
 ## 已知边界
