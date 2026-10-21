@@ -195,10 +195,12 @@ function renderFiles() {
   const q = ($('fileSearch').value || '').trim().toLowerCase();
   list.textContent = '';
   if (!S.pkg) {
+    list.classList.add('is-empty');
     list.appendChild(el('div', 'list-empty', '—'));
     $('entryCount').textContent = '—';
     return;
   }
+  list.classList.remove('is-empty');
   const entries = S.pkg.entries.filter(e => !q || e.name.toLowerCase().includes(q));
   $('entryCount').textContent = q ? `${entries.length} / ${S.pkg.entries.length} 项` : `${entries.length} 项`;
 
@@ -228,9 +230,11 @@ function renderImages() {
   $('imgCount').textContent = pkg ? String(pkg.images.length) : '';
 
   if (!pkg || !pkg.images.length) {
+    grid.classList.add('is-empty');
     grid.appendChild(el('div', 'list-empty', pkg ? '包内没有图片资源' : '—'));
     return;
   }
+  grid.classList.remove('is-empty');
 
   const list = q ? pkg.images.filter(i => i.name.toLowerCase().includes(q)) : pkg.images;
   if (!list.length) {
