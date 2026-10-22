@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "esbuild assets/app.js --bundle --format=iife --minify --outfile=assets/bundle.js",
-    "serve": "python3 -m http.server 8123",
-    "build:md3": "esbuild md3/md3.js --bundle --format=iife --minify --outfile=md3/bundle.js"
+    "serve": "python3 -m http.server 8123"
   },
   "devDependencies": {
     "esbuild": "^0.23.1"
