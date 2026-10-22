@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild assets/app.js --bundle --format=iife --minify --outfile=assets/bundle.js",
+    "build": "node build.mjs",
     "serve": "python3 -m http.server 8123"
   },
   "devDependencies": {
