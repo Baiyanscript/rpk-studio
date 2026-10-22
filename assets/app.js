@@ -1,6 +1,21 @@
-import { inspect, repack, createIdentity, importPrivateKey, sha256 } from './rpk.js';
+import { inspect, repack, createIdentity, importPrivateKey, sha256, measureImage } from './rpk.js';
 import { dataOf } from './zip.js';
-import { zipSync } from '../vendor/fflate.js';
+import { Zip, ZipDeflate } from '../vendor/fflate.js';
+
+const BUILD = __BUILD__;
+
+// HTML 与脚本版本不一致时自愈：只强刷一次，避免循环
+(function syncVersion() {
+  if (window.__PAGE_VERSION__ === BUILD) return;
+  try {
+    const key = `rpk-reload-${BUILD}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, '1');
+  } catch {}
+  const u = new URL(location.href);
+  u.searchParams.set('v', BUILD);
+  location.replace(u.toString());
+})();
 
 const $ = id => document.getElementById(id);
 
@@ -24,6 +39,8 @@ const S = {
   pending: null,
   optVerify: true,
   optWatch: true,
+  sizes: new Map(),
+  dupes: null,
 };
 
 const fmtSize = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
@@ -31,13 +48,31 @@ const hexUpper = b => [...b].map(x => x.toString(16).padStart(2, '0')).join('').
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const te = new TextEncoder();
 
+/* ---------- 调度工具 ---------- */
+
+const yieldToUI = () => new Promise(resolve => {
+  if (typeof scheduler !== 'undefined' && typeof scheduler.yield === 'function') {
+    scheduler.yield().then(resolve, resolve);
+    return;
+  }
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => { ch.port1.close(); resolve(); };
+  ch.port2.postMessage(0);
+});
+
+const raf = () => new Promise(r => requestAnimationFrame(() => r()));
+
 let snackTimer = null;
 function snack(text) {
   const bar = $('snackbar');
   bar.textContent = text;
   bar.classList.add('is-open');
+  document.body.classList.add('snack-open');
   clearTimeout(snackTimer);
-  snackTimer = setTimeout(() => bar.classList.remove('is-open'), 3800);
+  snackTimer = setTimeout(() => {
+    bar.classList.remove('is-open');
+    document.body.classList.remove('snack-open');
+  }, 3800);
 }
 
 const el = (tag, cls, text) => {
@@ -47,6 +82,41 @@ const el = (tag, cls, text) => {
   return n;
 };
 
+/* ---------- 忙碌遮罩 ---------- */
+
+let scrimTimer = null;
+
+function showScrim(text, sub = '') {
+  const box = $('scrim');
+  $('scrimText').textContent = text;
+  $('scrimSub').textContent = sub;
+  const bar = $('scrimBar');
+  bar.hidden = true;
+  bar.firstElementChild.style.width = '0%';
+  clearTimeout(scrimTimer);
+  // 快操作不闪屏：超过 140ms 才显示
+  scrimTimer = setTimeout(() => {
+    box.hidden = false;
+    document.body.classList.add('is-busy');
+  }, 140);
+}
+
+function setScrimProgress(done, total, label) {
+  if (total <= 0) return;
+  const bar = $('scrimBar');
+  if (bar.hidden) bar.hidden = false;
+  bar.firstElementChild.style.width = `${Math.round((done / total) * 100)}%`;
+  if (label) $('scrimSub').textContent = `${label} ${done} / ${total}`;
+}
+
+function hideScrim() {
+  clearTimeout(scrimTimer);
+  $('scrim').hidden = true;
+  document.body.classList.remove('is-busy');
+}
+
+/* ---------- 通用 ---------- */
+
 function download(name, bytes) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
@@ -55,9 +125,27 @@ function download(name, bytes) {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
+function updateFab() {
+  const fab = $('fab');
+  const ready = Boolean(S.pkg && S.identity && !S.busy);
+  const visible = ready && S.view !== 'settings';
+  fab.disabled = !ready;
+  fab.classList.toggle('is-off', !visible);
+}
+
 const entryByName = n => S.pkg?.entries.find(e => e.name === n) || null;
 const imageBytes = n => S.images[n] || (entryByName(n) ? dataOf(entryByName(n)) : null);
 const iconName = () => (S.pkg?.manifest?.icon || '/common/icon.png').replace(/^\//, '');
+
+function imgMeta(name) {
+  const meta = S.pkg?.images.find(i => i.name === name);
+  if (!meta) return null;
+  if (!meta.w && meta.entry) {
+    const size = measureImage(meta.entry) || S.sizes.get(name);
+    if (size) { meta.w = size.w; meta.h = size.h; S.sizes.set(name, size); }
+  }
+  return meta;
+}
 
 /* ---------- 导航 ---------- */
 
@@ -82,7 +170,16 @@ function buildNav() {
 }
 
 function go(view) {
-  if (S.view === view) return;
+  const target = document.querySelector(`.md-view[data-view="${view}"]`);
+  // 版本不匹配兜底：目标视图不存在就退回概览，别把页面清空
+  if (!target) {
+    view = 'overview';
+    reportMismatch();
+  }
+  if (S.view === view) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
   S.view = view;
   for (const v of document.querySelectorAll('.md-view')) {
     v.classList.toggle('is-active', v.dataset.view === view);
@@ -90,7 +187,7 @@ function go(view) {
   for (const b of document.querySelectorAll('.md-nav-item')) {
     b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false');
   }
-  $('fab').classList.toggle('hidden', view === 'settings');
+  updateFab();
   if (view === 'assets') {
     if (S.tab === 'files') renderFiles(); else renderImages();
   } else if (view === 'details') {
@@ -103,7 +200,17 @@ function go(view) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-/* ---------- 渲染 ---------- */
+let mismatchShown = false;
+function reportMismatch() {
+  if (mismatchShown) return;
+  mismatchShown = true;
+  const bar = $('fatal');
+  if (!bar) return;
+  bar.hidden = false;
+  bar.textContent = '页面与脚本版本不一致，部分功能不可用。请强制刷新（Ctrl/Cmd + Shift + R）。';
+}
+
+/* ---------- 概览 ---------- */
 
 function setChip(state, text) {
   const c = $('badge');
@@ -117,7 +224,7 @@ function renderForm() {
   for (const id of ['fName', 'fPackage', 'fVersionName', 'fVersionCode']) $(id).disabled = !on;
   $('pickIcon').disabled = !on;
   $('search').disabled = !on;
-  $('fab').disabled = !on || !S.identity || S.busy;
+  updateFab();
   if (!m) {
     $('detailState').textContent = '载入包后可编辑';
     return;
@@ -129,11 +236,15 @@ function renderForm() {
 
   const icon = imageBytes(iconName()) || S.pkg.icon;
   const box = $('iconPreview');
+  if (box.dataset.url) { URL.revokeObjectURL(box.dataset.url); delete box.dataset.url; }
   box.textContent = '';
   if (icon) {
+    const url = URL.createObjectURL(new Blob([icon], { type: 'image/png' }));
+    box.dataset.url = url;
     const img = new Image();
-    img.src = URL.createObjectURL(new Blob([icon], { type: 'image/png' }));
+    img.src = url;
     img.onload = () => { $('iconHint').textContent = `${img.naturalWidth} × ${img.naturalHeight} PNG`; };
+    img.onerror = () => { $('iconHint').textContent = '图标解码失败'; };
     box.appendChild(img);
   }
 }
@@ -177,6 +288,14 @@ function renderVerify() {
     setChip('', '未签名');
     return;
   }
+  if (!pkg.verify) {
+    box.textContent = '';
+    const row = el('div', 'md-row md-verify__pending');
+    row.append(el('span', 'md-spinner md-spinner--sm'), el('span', 'md-body-small md-muted', '正在校验签名…'));
+    box.appendChild(row);
+    setChip('warn', '校验中');
+    return;
+  }
   const v = pkg.verify;
   box.textContent = '';
   const line = (ok, label, right) => {
@@ -203,25 +322,53 @@ function renderNotice() {
     : `包内 ${pkg.embedded.source} 是未压缩脚本，manifest 副本与外层一致时无需处理。`;
 }
 
-function renderFiles() {
+/* ---------- 文件列表（分片渲染） ---------- */
+
+let fileToken = 0;
+
+async function renderFiles() {
+  const token = ++fileToken;
   const list = $('fileList');
+  const status = $('listStatus');
   const q = ($('search').value || '').trim().toLowerCase();
   list.textContent = '';
+  status.hidden = true;
+
   if (!S.pkg) {
     list.appendChild(el('li', 'md-list-item md-muted', '载入包后显示'));
     $('entryCount').textContent = '';
     return;
   }
-  const entries = S.pkg.entries.filter(e => !q || e.name.toLowerCase().includes(q));
-  $('entryCount').textContent = q ? `${entries.length}/${S.pkg.entries.length}` : `${entries.length} 项`;
+  const all = S.pkg.entries;
+  const entries = q ? all.filter(e => e.name.toLowerCase().includes(q)) : all;
+  const showCount = () => { $('entryCount').textContent = q ? `${entries.length}/${all.length}` : `${entries.length} 项`; };
 
+  const BATCH = 60;
+  if (entries.length <= BATCH) {
+    list.appendChild(fileFragment(entries, 0));
+    showCount();
+    return;
+  }
+
+  status.hidden = false;
+  for (let i = 0; i < entries.length; i += BATCH) {
+    if (token !== fileToken) return;
+    list.appendChild(fileFragment(entries.slice(i, i + BATCH), i));
+    status.textContent = `已显示 ${Math.min(i + BATCH, entries.length)} / ${entries.length}`;
+    await yieldToUI();
+  }
+  if (token !== fileToken) return;
+  status.hidden = true;
+  showCount();
+}
+
+function fileFragment(entries) {
   const frag = document.createDocumentFragment();
-  entries.forEach((e, i) => {
+  for (const e of entries) {
     const li = el('li', 'md-list-item');
-    li.style.animation = `md-item-in .22s cubic-bezier(.2,0,0,1) ${Math.min(i, 12) * 12}ms both`;
     const name = el('span', 'md-list-item__name', e.name);
     if (e.isDir) name.style.opacity = '.55';
-    li.append(name, el('span', 'md-list-item__meta', e.isDir ? '—' : fmtSize(dataOf(e).length)));
+    li.append(name, el('span', 'md-list-item__meta', e.isDir ? '—' : fmtSize(e.usize)));
     if (!e.isDir) {
       const btn = el('button', 'md-btn md-btn--text', '取出');
       btn.type = 'button';
@@ -229,28 +376,116 @@ function renderFiles() {
       li.appendChild(btn);
     }
     frag.appendChild(li);
-  });
-  list.appendChild(frag);
+  }
+  return frag;
+}
+
+/* ---------- 图片网格（占位 + 懒加载） ---------- */
+
+let imgToken = 0;
+const hydration = [];
+let pumping = false;
+
+const io = 'IntersectionObserver' in window
+  ? new IntersectionObserver(list => {
+      for (const item of list) {
+        if (!item.isIntersecting) continue;
+        io.unobserve(item.target);
+        hydration.push(item.target);
+      }
+      pumpHydration();
+    }, { root: null, rootMargin: '300px 0px' })
+  : null;
+
+async function pumpHydration() {
+  if (pumping) return;
+  pumping = true;
+  let n = 0;
+  while (hydration.length) {
+    const tile = hydration.shift();
+    if (tile.isConnected) hydrateTile(tile);
+    if (++n % 6 === 0) await yieldToUI();
+  }
+  pumping = false;
+}
+
+function duplicateBases(list) {
+  const count = new Map();
+  for (const i of list) {
+    const b = i.name.split('/').pop();
+    count.set(b, (count.get(b) || 0) + 1);
+  }
+  const dup = new Set();
+  for (const [b, n] of count) if (n > 1) dup.add(b);
+  return dup;
+}
+
+function subLabel(name) {
+  const parts = name.split('/');
+  return parts.length > 1 ? parts[parts.length - 2] : '';
+}
+
+function tileMeta(img) {
+  const base = img.name.split('/').pop();
+  if (S.dupes?.has(base)) {
+    const dir = subLabel(img.name);
+    return dir ? `${dir} · ${img.bytes ? fmtSize(img.bytes) : ''}`.replace(/ · $/, '') : fmtSize(img.bytes);
+  }
+  return fmtSize(img.bytes);
+}
+
+function skeletonTile(img, index) {
+  const tile = el('div', 'md-tile is-skeleton');
+  tile.dataset.name = img.name;
+  tile.title = img.name;
+  tile.style.animationDelay = `${Math.min(index, 12) * 8}ms`;
+  const frame = el('div', 'md-tile__img');
+  frame.appendChild(el('span', 'md-tile__ph'));
+  tile.append(frame,
+    el('div', 'md-tile__name', img.name.split('/').pop()),
+    el('div', 'md-tile__meta', tileMeta(img)));
+  return tile;
+}
+
+function hydrateTile(tile) {
+  const name = tile.dataset.name;
+  const meta = S.pkg?.images.find(i => i.name === name);
+  if (!meta) return;
+  const full = makeTile(meta);
+  full.style.animation = 'md-item-in .22s cubic-bezier(.2,0,0,1)';
+  tile.replaceWith(full);
 }
 
 function makeTile(img) {
   const changed = Boolean(S.images[img.name]);
-  const url = URL.createObjectURL(new Blob([imageBytes(img.name)], { type: 'image/png' }));
-  S.urls.set(img.name, url);
-
+  const bytes = imageBytes(img.name);
   const tile = el('div', `md-tile${changed ? ' is-changed' : ''}`);
   tile.dataset.name = img.name;
+  tile.title = img.name;
 
   const frame = el('div', 'md-tile__img');
-  const im = new Image();
-  im.src = url;
-  im.loading = 'lazy';
-  im.alt = '';
-  frame.appendChild(im);
+  if (bytes) {
+    const old = S.urls.get(img.name);
+    if (old) URL.revokeObjectURL(old);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+    S.urls.set(img.name, url);
+    const im = new Image();
+    im.src = url;
+    im.loading = 'lazy';
+    im.decoding = 'async';
+    im.alt = '';
+    frame.appendChild(im);
+  } else {
+    frame.appendChild(el('span', 'md-tile__ph'));
+  }
 
+  const meta = imgMeta(img.name);
+  const dim = meta?.w ? `${meta.w}×${meta.h}` : fmtSize(img.bytes);
+  const base = img.name.split('/').pop();
+  const dir = S.dupes?.has(base) ? subLabel(img.name) : '';
   tile.append(frame,
-    el('div', 'md-tile__name', img.name.split('/').pop()),
-    el('div', 'md-tile__meta', img.w ? `${img.w}×${img.h}` : fmtSize(img.bytes)));
+    el('div', 'md-tile__name', base),
+    el('div', 'md-tile__meta', dir ? `${dir} · ${dim}` : dim));
 
   if (changed) tile.appendChild(el('span', 'md-tile__dot'));
 
@@ -274,35 +509,65 @@ function makeTile(img) {
   return tile;
 }
 
-function renderImages() {
+async function renderImages() {
+  const token = ++imgToken;
   const grid = $('imageGrid');
-  const pkg = S.pkg;
+  const status = $('gridStatus');
   const q = ($('search').value || '').trim().toLowerCase();
   grid.textContent = '';
-  $('imgCount').textContent = pkg ? String(pkg.images.length) : '0';
+  status.hidden = true;
+  $('imgCount').textContent = S.pkg ? String(S.pkg.images.length) : '0';
 
-  if (!pkg || !pkg.images.length) {
-    grid.appendChild(el('p', 'md-body-small md-muted', pkg ? '包内没有图片资源' : '载入包后显示'));
-    return;
-  }
+  if (io) io.disconnect();
+  hydration.length = 0;
   for (const u of S.urls.values()) URL.revokeObjectURL(u);
   S.urls.clear();
 
-  const list = q ? pkg.images.filter(i => i.name.toLowerCase().includes(q)) : pkg.images;
-  list.forEach((img, i) => {
-    const t = makeTile(img);
-    t.style.animation = `md-item-in .24s cubic-bezier(.2,0,0,1) ${Math.min(i, 16) * 10}ms both`;
-    grid.appendChild(t);
-  });
+  if (!S.pkg || !S.pkg.images.length) {
+    grid.appendChild(el('p', 'md-body-small md-muted', S.pkg ? '包内没有图片资源' : '载入包后显示'));
+    return;
+  }
+
+  const list = q ? S.pkg.images.filter(i => i.name.toLowerCase().includes(q)) : S.pkg.images;
+  if (!list.length) {
+    grid.appendChild(el('p', 'md-body-small md-muted', '没有匹配的图片'));
+    return;
+  }
+  S.dupes = duplicateBases(list);
+
+  const BATCH = 30;
+  for (let i = 0; i < list.length; i += BATCH) {
+    if (token !== imgToken) return;
+    const frag = document.createDocumentFragment();
+    for (let k = i; k < Math.min(i + BATCH, list.length); k++) {
+      const tile = skeletonTile(list[k], k);
+      frag.appendChild(tile);
+    }
+    grid.appendChild(frag);
+    const fresh = [...grid.querySelectorAll('.md-tile.is-skeleton')];
+    for (const t of fresh) {
+      if (io) io.observe(t); else hydration.push(t);
+    }
+    if (!io) pumpHydration();
+    if (list.length > BATCH) {
+      status.hidden = false;
+      status.textContent = `已加载 ${Math.min(i + BATCH, list.length)} / ${list.length}`;
+      await yieldToUI();
+    }
+  }
+  if (token !== imgToken) return;
+  status.hidden = true;
 }
 
 function updateTile(name) {
-  const meta = S.pkg.images.find(i => i.name === name);
+  const meta = S.pkg?.images.find(i => i.name === name);
   const old = $('imageGrid').querySelector(`.md-tile[data-name="${CSS.escape(name)}"]`);
-  if (!meta || !old) { renderImages(); return; }
-  const url = S.urls.get(name);
-  if (url) URL.revokeObjectURL(url);
-  old.replaceWith(makeTile(meta));
+  if (!meta) return;
+  if (old) {
+    const urls = S.urls.get(name);
+    if (urls) { URL.revokeObjectURL(urls); S.urls.delete(name); }
+    old.replaceWith(makeTile(meta));
+  }
   if (name === iconName()) renderForm();
 }
 
@@ -310,7 +575,7 @@ function renderDirty() {
   const m = S.pkg?.manifest;
   if (!m) {
     $('detailState').textContent = '载入包后可编辑';
-    $('fab').disabled = true;
+    updateFab();
     return;
   }
   const n = Object.keys(S.images).length;
@@ -323,7 +588,7 @@ function renderDirty() {
   $('detailState').textContent = diff
     ? `已修改${n ? ` · ${n} 张图` : ''}，导出时生效`
     : '与包内一致';
-  $('fab').disabled = !S.identity || !S.pkg || S.busy;
+  updateFab();
 }
 
 function renderIdentity() {
@@ -339,7 +604,7 @@ function renderIdentity() {
     info.append(el('dt', null, '说明'), el('dd', null, '生成或导入后，导出时会用这张证书重签。'));
     $('exportId').disabled = true;
     $('copyFingerprint').disabled = true;
-    $('fab').disabled = true;
+    updateFab();
     return;
   }
 
@@ -359,7 +624,7 @@ function renderIdentity() {
 
   $('exportId').disabled = !id.pkcs8;
   $('copyFingerprint').disabled = false;
-  $('fab').disabled = !S.pkg || S.busy;
+  updateFab();
 }
 
 function setTab(tab) {
@@ -371,8 +636,10 @@ function setTab(tab) {
   $('imageGrid').classList.toggle('hidden', files);
   $('exportImages').classList.toggle('hidden', files || !S.pkg);
   if (files) {
+    $('gridStatus').hidden = true;
     renderFiles();
   } else {
+    $('listStatus').hidden = true;
     $('entryCount').textContent = S.pkg ? `${S.pkg.images.length} 张` : '';
     renderImages();
   }
@@ -390,9 +657,12 @@ const HINTS = {
 };
 
 function openEditor(name) {
-  const meta = S.pkg?.images.find(i => i.name === name);
+  const meta = imgMeta(name);
   if (!meta) return;
-  const url = URL.createObjectURL(new Blob([imageBytes(name)], { type: 'image/png' }));
+  const bytes = imageBytes(name);
+  if (!bytes) { snack('这张图读不出来'); return; }
+
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
   Ed.name = name;
   Ed.W = meta.w || 0;
   Ed.H = meta.h || 0;
@@ -497,7 +767,7 @@ async function applyEditor() {
   if (!Ed.img) return;
   const btn = $('dApply');
   btn.disabled = true;
-  await new Promise(r => setTimeout(r, 16));
+  await raf();
   try {
     let bytes;
     const cv = $('canvas');
@@ -542,6 +812,35 @@ async function loadIntoEditor(file) {
   img.src = url;
 }
 
+/* ---------- 流式 zip ---------- */
+
+async function zipAsync(files, onProgress) {
+  const chunks = [];
+  let failure = null;
+  const zip = new Zip((err, chunk) => {
+    if (err) { failure = err; return; }
+    if (chunk) chunks.push(chunk);
+  });
+  const names = Object.keys(files);
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const entry = new ZipDeflate(name, { level: 6 });
+    zip.add(entry);
+    entry.push(files[name], true);
+    if (i % 6 === 5 || i === names.length - 1) {
+      onProgress?.(i + 1, names.length);
+      await yieldToUI();
+    }
+  }
+  zip.end();
+  if (failure) throw failure;
+  const total = chunks.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(total);
+  let p = 0;
+  for (const c of chunks) { out.set(c, p); p += c.length; }
+  return out;
+}
+
 /* ---------- 身份导出 ---------- */
 
 function derToPem(der, label) {
@@ -558,31 +857,38 @@ function derToPem(der, label) {
 async function exportIdentity() {
   const id = S.identity;
   if (!id?.pkcs8) { snack('当前身份没有可导出的私钥'); return; }
-  const priv = derToPem(id.pkcs8, 'PRIVATE KEY');
-  const cert = derToPem(id.certDer, 'CERTIFICATE');
-  const readme = [
-    'RPK Studio 导出的签名身份',
-    '',
-    `CN: ${id.cn}`,
-    `有效期至: ${id.notAfter.toISOString()}`,
-    `SHA-256 指纹: ${hexUpper(id.fingerprint).match(/../g).join(':')}`,
-    '',
-    'private.pem      PKCS#8 私钥，务必保密',
-    'certificate.pem  X.509 自签证书',
-    '',
-    '转成 keystore：',
-    'openssl pkcs12 -export -inkey private.pem -in certificate.pem -out key.p12',
-  ].join('\n');
+  const btn = $('exportId');
+  btn.disabled = true;
+  try {
+    const priv = derToPem(id.pkcs8, 'PRIVATE KEY');
+    const cert = derToPem(id.certDer, 'CERTIFICATE');
+    const readme = [
+      'RPK Studio 导出的签名身份',
+      '',
+      `CN: ${id.cn}`,
+      `有效期至: ${id.notAfter.toISOString()}`,
+      `SHA-256 指纹: ${hexUpper(id.fingerprint).match(/../g).join(':')}`,
+      '',
+      'private.pem      PKCS#8 私钥，务必保密',
+      'certificate.pem  X.509 自签证书',
+      '',
+      '转成 keystore：',
+      'openssl pkcs12 -export -inkey private.pem -in certificate.pem -out key.p12',
+    ].join('\n');
 
-  const zipped = zipSync({
-    'private.pem': te.encode(priv),
-    'certificate.pem': te.encode(cert),
-    'README.txt': te.encode(readme),
-  }, { level: 6 });
-
-  const safe = (id.cn || 'identity').replace(/[^\w\u4e00-\u9fa5-]+/g, '_');
-  download(`${safe}-identity.zip`, zipped);
-  snack('身份已导出：private.pem + certificate.pem');
+    const zipped = await zipAsync({
+      'private.pem': te.encode(priv),
+      'certificate.pem': te.encode(cert),
+      'README.txt': te.encode(readme),
+    });
+    const safe = (id.cn || 'identity').replace(/[^\w\u4e00-\u9fa5-]+/g, '_');
+    download(`${safe}-identity.zip`, zipped);
+    snack('身份已导出：private.pem + certificate.pem');
+  } catch (e) {
+    snack(`导出失败：${e.message || e}`);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* ---------- 读写 ---------- */
@@ -590,14 +896,21 @@ async function exportIdentity() {
 async function loadFile(file) {
   if (S.busy) return;
   S.busy = true;
-  snack(`读取 ${file.name} · ${fmtSize(file.size)}`);
+  showScrim('正在读取文件', file.name);
+
   try {
     const buf = new Uint8Array(await file.arrayBuffer());
     const t0 = performance.now();
-    const pkg = await inspect(buf);
+
+    $('scrimText').textContent = '正在解析包结构';
+    const pkg = await inspect(buf, p => {
+      if (p.stage === 'verify') setScrimProgress(p.done, p.total, '校验文件摘要');
+    });
+
     S.pkg = pkg;
     S.fileName = file.name;
     S.images = {};
+    S.sizes = new Map();
     for (const u of S.urls.values()) URL.revokeObjectURL(u);
     S.urls.clear();
 
@@ -606,6 +919,7 @@ async function loadFile(file) {
     $('fileName').textContent = file.name;
     $('fileMeta').textContent = `${fmtSize(file.size)} · ${pkg.entries.length} 项 · ${pkg.manifest?.package || '未知包名'}`;
 
+    hideScrim();
     renderForm();
     renderKV();
     renderVerify();
@@ -621,6 +935,7 @@ async function loadFile(file) {
     setChip('bad', '无法解析');
     snack(String(e.message || e));
   } finally {
+    hideScrim();
     S.busy = false;
     renderDirty();
   }
@@ -665,17 +980,24 @@ async function doExport() {
   fab.classList.add('is-loading');
   fab.disabled = true;
   const before = S.pkg.bytes.length;
+  showScrim('正在重新打包', '计算文件摘要');
 
   try {
-    const out = await repack(S.pkg, patch, S.identity);
+    const out = await repack(S.pkg, patch, S.identity, p => {
+      if (p.stage === 'digest') setScrimProgress(p.done, p.total, '计算文件摘要');
+    });
     download(`${patch.manifest.package}.release.${patch.manifest.versionName}.rpk`, out);
 
     const delta = out.length - before;
     const sign = `${delta >= 0 ? '+' : '-'}${fmtSize(Math.abs(delta))}`;
+    hideScrim();
 
     if (S.optVerify) {
+      $('scrimText').textContent = '正在自检导出的包';
+      showScrim('正在自检导出的包', '重新解析刚生成的文件');
       const check = await inspect(out);
       const ok = check.verify.digestOk && check.verify.rsaOk && check.verify.badFiles === 0;
+      hideScrim();
       snack(`已导出 ${fmtSize(out.length)}（${sign}）· ${ok ? '签名自检通过' : '签名自检失败'}`);
     } else {
       snack(`已导出 ${fmtSize(out.length)}（${sign}）`);
@@ -683,6 +1005,7 @@ async function doExport() {
   } catch (e) {
     snack(`导出失败：${e.message || e}`);
   } finally {
+    hideScrim();
     S.busy = false;
     fab.classList.remove('is-loading');
     renderDirty();
@@ -716,7 +1039,14 @@ for (const id of ['fName', 'fPackage', 'fVersionName', 'fVersionCode']) {
 
 $('tabFiles').addEventListener('click', () => setTab('files'));
 $('tabImages').addEventListener('click', () => setTab('images'));
-$('search').addEventListener('input', () => { if (S.tab === 'files') renderFiles(); else renderImages(); });
+
+let searchTimer = null;
+$('search').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    if (S.tab === 'files') renderFiles(); else renderImages();
+  }, 180);
+});
 
 $('optVerify').addEventListener('change', e => { S.optVerify = e.target.checked; });
 $('optWatch').addEventListener('change', e => { S.optWatch = e.target.checked; });
@@ -737,19 +1067,42 @@ $('imageInput').addEventListener('change', async e => {
   await loadIntoEditor(f);
 });
 
-$('exportImages').addEventListener('click', () => {
+$('exportImages').addEventListener('click', async () => {
   if (!S.pkg) return;
-  const files = {};
-  for (const img of S.pkg.images) files[img.name] = imageBytes(img.name);
-  const zipped = zipSync(files, { level: 6 });
-  download(`${S.pkg.manifest?.package || 'rpk'}-images.zip`, zipped);
-  snack(`导出 ${S.pkg.images.length} 张图片 · ${fmtSize(zipped.length)}`);
+  const btn = $('exportImages');
+  if (btn.classList.contains('is-loading')) return;
+  btn.classList.add('is-loading');
+  btn.disabled = true;
+  const list = S.pkg.images;
+  showScrim('正在打包图片', `0 / ${list.length}`);
+  try {
+    const files = {};
+    for (let i = 0; i < list.length; i++) {
+      files[list[i].name] = imageBytes(list[i].name);
+      if (i % 12 === 11) {
+        setScrimProgress(i + 1, list.length, '读取图片');
+        await yieldToUI();
+      }
+    }
+    const zipped = await zipAsync(files, (done, total) => setScrimProgress(done, total, '压缩'));
+    download(`${S.pkg.manifest?.package || 'rpk'}-images.zip`, zipped);
+    hideScrim();
+    snack(`导出 ${list.length} 张图片 · ${fmtSize(zipped.length)}`);
+  } catch (e) {
+    hideScrim();
+    snack(`导出失败：${e.message || e}`);
+  } finally {
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+  }
 });
 
 $('genId').addEventListener('click', async () => {
   const cn = $('cnInput').value.trim() || 'Vela App';
   const btn = $('genId');
   btn.disabled = true;
+  btn.classList.add('is-loading');
+  await raf();
   try {
     const id = await createIdentity(cn, 3650);
     S.identity = { ...id, fingerprint: new Uint8Array(await sha256(id.certDer)) };
@@ -759,6 +1112,7 @@ $('genId').addEventListener('click', async () => {
   } catch (e) {
     snack(`生成失败：${e.message || e}`);
   } finally {
+    btn.classList.remove('is-loading');
     btn.disabled = false;
   }
 });
@@ -871,11 +1225,21 @@ $('themeSeg').addEventListener('click', e => {
   if (b) applyTheme(b.dataset.themeChoice);
 });
 
+/* 版本契约自检 */
+(function checkContract() {
+  const views = document.querySelectorAll('.md-view').length;
+  if (views !== VIEWS.length) {
+    reportMismatch();
+  }
+  if (!('showModal' in HTMLDialogElement.prototype)) {
+    snack('浏览器版本偏旧，部分功能不可用');
+  }
+})();
+
 /* 初始化 */
 try { applyTheme(localStorage.getItem(THEME_KEY) || 'auto'); } catch { applyTheme('auto'); }
 renderKV();
 renderFiles();
-renderImages();
 renderForm();
 renderIdentity();
 renderSettings();
