@@ -118,7 +118,11 @@ export async function createIdentity(cn, days = 3650, existing = null) {
   );
   const sig = new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, tbs));
   const cert = seq(tbs, SHA256_RSA(), tlv(0x03, concat([Uint8Array.of(0), sig])));
-  return { key, certDer: cert, pubDer: spki, cn, notBefore: now, notAfter: exp };
+
+  let pkcs8 = null;
+  try { pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', key)); } catch {}
+
+  return { key, certDer: cert, pubDer: spki, cn, notBefore: now, notAfter: exp, pkcs8 };
 }
 
 export async function importPrivateKey(pem) {
@@ -376,7 +380,19 @@ export function pngSize(data) {
 }
 const CERT = 'META-INF/CERT';
 
-export async function inspect(bytes) {
+const yieldToUI = () => new Promise(resolve => {
+  if (typeof scheduler !== 'undefined' && typeof scheduler.yield === 'function') {
+    scheduler.yield().then(resolve, resolve);
+    return;
+  }
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => { ch.port1.close(); resolve(); };
+  ch.port2.postMessage(0);
+});
+
+export async function inspect(bytes, onProgress) {
+  const report = (stage, done, total) => { try { onProgress?.({ stage, done, total }); } catch {} };
+  report('read', 0, 1);
   const { entries, comment } = readZip(bytes);
   const find = name => entries.find(e => e.name === name);
 
@@ -409,21 +425,23 @@ export async function inspect(bytes) {
     const byCrc = new Map();
     for (const e of entries) if (!e.isDir) byCrc.set(crc32(te.encode(e.name)), e);
     let badFiles = 0;
-    for (const f of sig.fileHashes) {
+    const total = sig.fileHashes.length;
+    report('verify', 0, total);
+    for (let i = 0; i < total; i++) {
+      const f = sig.fileHashes[i];
       const e = byCrc.get(f.nameCrc);
-      if (!e) { badFiles++; continue; }
-      if (hex(new Uint8Array(await crypto.subtle.digest('SHA-256', dataOf(e)))) !== hex(f.hash)) badFiles++;
+      if (!e) badFiles++;
+      else if (hex(new Uint8Array(await crypto.subtle.digest('SHA-256', dataOf(e)))) !== hex(f.hash)) badFiles++;
+      if (i % 24 === 23) { report('verify', i + 1, total); await yieldToUI(); }
     }
+    report('verify', total, total);
     verify = { digestOk, rsaOk, badFiles, fileCount: sig.fileHashes.length, cert: parseCertificate(sig.certDer) };
   }
 
+  report('index', 0, 1);
   const images = entries
     .filter(e => !e.isDir && IMAGE_RE.test(e.name))
-    .map(e => {
-      const data = dataOf(e);
-      const size = pngSize(data);
-      return { name: e.name, bytes: data.length, w: size?.w || 0, h: size?.h || 0 };
-    });
+    .map(e => ({ name: e.name, bytes: e.usize, w: 0, h: 0, entry: e }));
 
   const iconPath = manifest?.icon || '/common/icon.png';
   const iconEntry = find(iconPath.replace(/^\//, ''));
@@ -434,6 +452,11 @@ export async function inspect(bytes) {
     bytes, entries, comment, manifest, watch, sig, verify, iconEntry, codeEntry, embedded,
     images, icon: iconEntry ? dataOf(iconEntry) : null,
   };
+}
+
+export function measureImage(entry) {
+  if (!entry) return null;
+  try { return pngSize(dataOf(entry)); } catch { return null; }
 }
 
 function readEmbedded(entry) {
@@ -457,8 +480,10 @@ function readEmbedded(entry) {
 
 /* ---------- 重新打包 ---------- */
 
-export async function repack(pkg, patch, identity) {
-  const entries = pkg.entries.map(e => ({ ...e, data: dataOf(e), reuseRaw: !e.isDir }));
+export async function repack(pkg, patch, identity, onProgress) {
+  const report = (stage, done, total) => { try { onProgress?.({ stage, done, total }); } catch {} };
+  report('prepare', 0, 1);
+  const entries = pkg.entries.map(e => ({ ...e, reuseRaw: !e.isDir }));
 
   const setText = (name, text) => {
     const e = entries.find(x => x.name === name);
@@ -485,10 +510,15 @@ export async function repack(pkg, patch, identity) {
 
   // 1) 重算 hash.json → CERT
   const digests = {};
-  for (const e of entries) {
-    if (e.isDir || isMeta(e.name)) continue;
-    digests[e.name] = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', e.data)));
+  const need = entries.filter(e => !e.isDir && !isMeta(e.name));
+  report('digest', 0, need.length);
+  let done = 0;
+  for (const e of need) {
+    digests[e.name] = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', dataOf(e))));
+    done++;
+    if (done % 24 === 0) { report('digest', done, need.length); await yieldToUI(); }
   }
+  report('digest', need.length, need.length);
   const hashJson = te.encode(JSON.stringify({ algorithm: 'SHA-256', digests }));
   const certZip = writeZip([{ name: 'hash.json', data: hashJson, isDir: false, method: 8, flags: 0, ...dosNow() }], '');
 
