@@ -4,7 +4,7 @@
 
 在线使用：**https://hrk666666.github.io/rpk-studio/**
 
-界面遵循 Material Design 3：桌面用导航栏（Navigation rail），手机用底部导航（Navigation bar），四个页面分开——概览 / 资源 / 信息 / 签名。
+界面遵循 Material Design 3：桌面用导航栏（Navigation rail），手机用底部导航（Navigation bar），五个页面分开——概览 / 资源 / 信息 / 签名 / 设置。
 
 ## 功能
 
@@ -12,7 +12,6 @@
 - 解析 `manifest.json` / `manifest-watch.json`：包名、应用名、版本、页面数、文件数、体积
 - 验签：RSA 签名、三段摘要、逐文件 SHA-256、证书主体与有效期
 - 检测 `app.jsc` 里内嵌的 manifest 副本，比对外层版本号是否一致
-- 导出开关：导出后自动校验、是否同步 manifest-watch.json
 
 **资源**
 - 包内全部文件按路径筛选，任意条目单独取出
@@ -23,6 +22,10 @@
 **应用信息**
 - 改应用名、包名、版本名、版本号
 - 换图标（同名替换，自动转 PNG）
+
+**设置**
+- 外观：跟随系统 / 浅色 / 深色（记住选择）
+- 导出后自动校验签名、是否同步 manifest-watch.json
 
 **签名**
 - 生成 RSA-2048 自签证书（CN 可填，10 年有效期）
