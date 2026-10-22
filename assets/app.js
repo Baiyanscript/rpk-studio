@@ -404,7 +404,7 @@ async function pumpHydration() {
   while (hydration.length) {
     const tile = hydration.shift();
     if (tile.isConnected) hydrateTile(tile);
-    if (++n % 6 === 0) await yieldToUI();
+    if (++n % 4 === 0) await yieldToUI();
   }
   pumping = false;
 }
@@ -535,16 +535,17 @@ async function renderImages() {
   }
   S.dupes = duplicateBases(list);
 
-  const BATCH = 30;
+  const BATCH = 20;
   for (let i = 0; i < list.length; i += BATCH) {
     if (token !== imgToken) return;
     const frag = document.createDocumentFragment();
+    const fresh = [];
     for (let k = i; k < Math.min(i + BATCH, list.length); k++) {
       const tile = skeletonTile(list[k], k);
       frag.appendChild(tile);
+      fresh.push(tile);
     }
     grid.appendChild(frag);
-    const fresh = [...grid.querySelectorAll('.md-tile.is-skeleton')];
     for (const t of fresh) {
       if (io) io.observe(t); else hydration.push(t);
     }
@@ -552,6 +553,7 @@ async function renderImages() {
     if (list.length > BATCH) {
       status.hidden = false;
       status.textContent = `已加载 ${Math.min(i + BATCH, list.length)} / ${list.length}`;
+      await raf();
       await yieldToUI();
     }
   }
