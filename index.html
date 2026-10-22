@@ -6,11 +6,15 @@
 <title>RPK Studio</title>
 <link rel="icon" href="data:,">
 <meta name="color-scheme" content="light dark">
-<meta http-equiv="Cache-Control" content="no-cache">
-<link rel="stylesheet" href="assets/md3.css?v=3">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<link rel="stylesheet" href="assets/md3.css?v=202610230004">
 </head>
 <body>
 <div id="fatal" class="md-fatal" hidden></div>
+<script>
+window.__PAGE_VERSION__ = '202610230004';
+</script>
 <script>
 window.addEventListener('error', function (e) {
   var bar = document.getElementById('fatal');
@@ -103,7 +107,9 @@ window.addEventListener('error', function (e) {
       </div>
 
       <ul class="md-list" id="fileList" role="tabpanel"></ul>
+      <p class="md-render-state" id="listStatus" hidden></p>
       <div class="md-grid hidden" id="imageGrid" role="tabpanel"></div>
+      <p class="md-render-state" id="gridStatus" hidden></p>
     </section>
 
     <!-- 应用信息 -->
@@ -273,6 +279,15 @@ window.addEventListener('error', function (e) {
   <span>导出 RPK</span>
 </button>
 
+<div class="md-scrim" id="scrim" hidden>
+  <div class="md-scrim__panel" role="status" aria-live="polite">
+    <span class="md-spinner" aria-hidden="true"></span>
+    <p class="md-title-small" id="scrimText">正在处理</p>
+    <div class="md-progress" id="scrimBar" hidden><i></i></div>
+    <p class="md-body-small md-muted" id="scrimSub"></p>
+  </div>
+</div>
+
 <div class="md-snackbar" id="snackbar" role="status" aria-live="polite"></div>
 
 <dialog class="md-dialog" id="editor">
@@ -318,6 +333,6 @@ window.addEventListener('error', function (e) {
   </div>
 </dialog>
 
-<script src="assets/bundle.js?v=3" defer></script>
+<script src="assets/bundle.js?v=202610230004" defer></script>
 </body>
 </html>
