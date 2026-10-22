@@ -9,6 +9,7 @@ const VIEWS = [
   { id: 'assets', label: '资源', path: 'M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z' },
   { id: 'details', label: '信息', path: 'M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z' },
   { id: 'signature', label: '签名', path: 'M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z' },
+  { id: 'settings', label: '设置', path: 'M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.38.12-.6l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.22-.07.46.12.6l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.38-.12.6l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.46-.12-.6l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z' },
 ];
 
 const S = {
@@ -95,6 +96,8 @@ function go(view) {
     renderForm();
   } else if (view === 'signature') {
     renderIdentity();
+  } else if (view === 'settings') {
+    renderSettings();
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -835,17 +838,44 @@ $('fab').addEventListener('click', doExport);
 })();
 
 /* 主题 */
-$('themeBtn').addEventListener('click', () => {
-  const cur = document.documentElement.dataset.theme;
-  const dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
-  snack(dark ? '已切换到浅色' : '已切换到深色');
+const THEME_KEY = 'rpk-theme';
+
+function applyTheme(choice) {
+  const root = document.documentElement;
+  if (choice === 'auto') root.removeAttribute('data-theme');
+  else root.dataset.theme = choice;
+  try { localStorage.setItem(THEME_KEY, choice); } catch {}
+  const seg = $('themeSeg');
+  if (seg) {
+    for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice));
+  }
+  const hint = $('themeHint');
+  if (hint) {
+    hint.textContent = choice === 'auto'
+      ? '跟随系统设置自动切换。'
+      : choice === 'light' ? '固定浅色，忽略系统设置。' : '固定深色，忽略系统设置。';
+  }
+}
+
+function renderSettings() {
+  let saved = 'auto';
+  try { saved = localStorage.getItem(THEME_KEY) || 'auto'; } catch {}
+  applyTheme(saved);
+  $('optVerify').checked = S.optVerify;
+  $('optWatch').checked = S.optWatch;
+}
+
+$('themeSeg').addEventListener('click', e => {
+  const b = e.target.closest('[data-theme-choice]');
+  if (b) applyTheme(b.dataset.themeChoice);
 });
 
 /* 初始化 */
+try { applyTheme(localStorage.getItem(THEME_KEY) || 'auto'); } catch { applyTheme('auto'); }
 renderKV();
 renderFiles();
 renderImages();
 renderForm();
 renderIdentity();
+renderSettings();
 renderDirty();
