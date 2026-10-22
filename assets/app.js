@@ -90,6 +90,7 @@ function go(view) {
   for (const b of document.querySelectorAll('.md-nav-item')) {
     b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false');
   }
+  $('fab').classList.toggle('hidden', view === 'settings');
   if (view === 'assets') {
     if (S.tab === 'files') renderFiles(); else renderImages();
   } else if (view === 'details') {
