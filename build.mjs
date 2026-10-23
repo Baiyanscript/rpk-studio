@@ -3,7 +3,7 @@ import fs from 'node:fs';
 
 const d = new Date();
 const pad = n => String(n).padStart(2, '0');
-const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}`;
+const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 
 execSync(
   `npx esbuild assets/app.js --bundle --format=iife --minify ` +
