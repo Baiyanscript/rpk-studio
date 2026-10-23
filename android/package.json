@@ -1,0 +1,15 @@
+{
+  "name": "rpk-studio-android",
+  "version": "2.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "web": "node build-app.mjs",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "android": "tauri android build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
