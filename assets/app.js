@@ -22,6 +22,7 @@ const PAGES = [
   { id: 'overview', label: '包', path: 'M12 2 3 6.5v11L12 22l9-4.5v-11L12 2zm0 2.2 6.5 3.2L12 10.6 5.5 7.4 12 4.2z' },
   { id: 'edit', label: '编辑', path: 'M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.7 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z' },
   { id: 'export', label: '导出', path: 'M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.4-1.4L11 12.2V3zM5 19h14v2H5z' },
+  { id: 'settings', label: '设置', path: 'M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.38.12-.6l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.22-.07.46.12.6l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.38-.12.6l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.46-.12-.6l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z' },
 ];
 
 const S = {
@@ -39,6 +40,7 @@ const S = {
   optWatch: true,
   dupes: null,
   layer: null,
+  stale: false,
 };
 
 const fmtSize = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
@@ -170,7 +172,12 @@ function goTo(index, animate = true) {
   for (const b of document.querySelectorAll('.md-nav-item')) {
     b.setAttribute('aria-current', Number(b.dataset.index) === index ? 'page' : 'false');
   }
+  $('topTitle').textContent = PAGES[index].label;
   showNavBar();
+  if (index === 1 && S.stale) {
+    S.stale = false;
+    if (S.tab === 'files') renderFiles(); else renderImages();
+  }
 }
 
 /* ---------- 横向手势 ---------- */
@@ -264,12 +271,14 @@ function hideNavBar() {
   if (navHidden) return;
   navHidden = true;
   navBar.classList.add('is-hidden');
+  $('topBar').classList.add('is-hidden');
 }
 
 function showNavBar() {
   if (!navHidden) return;
   navHidden = false;
   navBar.classList.remove('is-hidden');
+  $('topBar').classList.remove('is-hidden');
 }
 
 for (const page of document.querySelectorAll('.md-page')) {
@@ -447,8 +456,6 @@ function renderKV() {
     ['平台版本', String(manifest?.minPlatformVersion ?? '—')],
   ];
   for (const [k, v] of rows) kv.append(el('dt', null, k), el('dd', null, v));
-  kv.append(el('dt', null, '签名'), el('dd', null, sig.present ? `RSA-${sig.signature.length * 8}` : '无'));
-  kv.append(el('dt', null, '摘要'), el('dd', null, sig.present ? 'SHA-256' : '—'));
 }
 
 function renderVerify() {
@@ -823,6 +830,7 @@ function setTab(tab) {
   $('exportImages').classList.toggle('hidden', !images || !S.pkg);
   $('gridStatus').hidden = true;
   $('listStatus').hidden = true;
+  S.stale = false;
   if (images) renderImages(); else renderFiles();
 }
 
@@ -1205,7 +1213,7 @@ async function loadFile(file) {
     renderKV();
     renderVerify();
     renderNotice();
-    if (S.tab === 'images') renderImages(); else renderFiles();
+    S.stale = true;
     renderDirty();
 
     const v = pkg.verify;
@@ -1533,8 +1541,6 @@ function applyTheme(choice) {
   }
 }
 
-$('settingsBtn').addEventListener('click', () => openLayer('settings'));
-
 $('themeSeg').addEventListener('click', e => {
   const b = e.target.closest('[data-theme-choice]');
   if (b) applyTheme(b.dataset.themeChoice);
@@ -1559,4 +1565,5 @@ renderForm();
 renderIdentity();
 renderDirty();
 renderImages();
+$('topTitle').textContent = PAGES[0].label;
 setTrack(0, false);
