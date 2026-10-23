@@ -111,6 +111,36 @@ function hideScrim() {
 
 /* ---------- 通用 ---------- */
 
+const IN_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+function bytesToBase64(bytes) {
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+// 网页走 a[download]；Tauri（含 Android）交给 Rust 写入并调系统面板
+async function saveBlob(name, bytes) {
+  if (IN_TAURI) {
+    try {
+      const path = await window.__TAURI__.core.invoke('save_bytes', {
+        name,
+        base64: bytesToBase64(bytes),
+      });
+      if (path) snack(`已保存到 ${path.split(/[\\/]/).pop()}`);
+      return true;
+    } catch (e) {
+      snack(`保存失败：${e}`);
+      return false;
+    }
+  }
+  download(name, bytes);
+  return true;
+}
+
 function download(name, bytes) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
@@ -554,7 +584,7 @@ function openFileSheet(entry) {
     {
       label: '取出这个文件',
       icon: 'M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.4-1.4L11 12.2V3zM5 19h14v2H5z',
-      onPick: () => download(entry.name.split('/').pop(), dataOf(entry)),
+      onPick: () => saveBlob(entry.name.split('/').pop(), dataOf(entry)),
     },
     {
       label: '复制包内路径',
@@ -1171,7 +1201,7 @@ async function exportIdentity() {
       'README.txt': te.encode(readme),
     });
     const safe = (id.cn || 'identity').replace(/[^\w\u4e00-\u9fa5-]+/g, '_');
-    download(`${safe}-identity.zip`, zipped);
+    await saveBlob(`${safe}-identity.zip`, zipped);
     snack('身份已导出：private.pem + certificate.pem');
   } catch (e) {
     snack(`导出失败：${e.message || e}`);
@@ -1274,7 +1304,7 @@ async function doExport() {
     const out = await repack(S.pkg, patch, S.identity, p => {
       if (p.stage === 'digest') setScrimProgress(p.done, p.total, '计算文件摘要');
     });
-    download(`${patch.manifest.package}.release.${patch.manifest.versionName}.rpk`, out);
+    await saveBlob(`${patch.manifest.package}.release.${patch.manifest.versionName}.rpk`, out);
 
     const delta = out.length - before;
     const sign = `${delta >= 0 ? '+' : '-'}${fmtSize(Math.abs(delta))}`;
@@ -1381,7 +1411,7 @@ $('exportImages').addEventListener('click', async () => {
       }
     }
     const zipped = await zipAsync(files, (done, total) => setScrimProgress(done, total, '压缩'));
-    download(`${S.pkg.manifest?.package || 'rpk'}-images.zip`, zipped);
+    await saveBlob(`${S.pkg.manifest?.package || 'rpk'}-images.zip`, zipped);
     hideScrim();
     snack(`导出 ${list.length} 张图片 · ${fmtSize(zipped.length)}`);
   } catch (e) {
