@@ -83,10 +83,16 @@ openssl pkcs12 -export -inkey private.pem -in certificate.pem -out key.p12
 
 > 换签名后，与原手机端配对的应用（带同步器、依赖互联通信的快应用）会拒绝通信。改包名会让设备当成新应用，旧数据不继承。
 
+## 安卓客户端
+
+`android/` 是 Tauri 2 + Rust 的外壳，WebView 加载同一份页面资源，Rust 负责写文件与调系统保存面板。
+构建方式、职责边界与本地验证状态见 [android/README.md](android/README.md)；
+仓库内的 `.github/workflows/android.yml` 可手动触发产出 debug APK。
+
 ## 目录
 
 ```
-index.html          页面（3 个主页面 + 2 个二级页面 + 弹层）
+index.html          页面（4 个主页面 + 1 个二级页面 + 弹层）
 assets/md3.css      M3 tokens 与组件
 assets/app.js       交互逻辑（源码）：分页手势、层级、渲染、编辑器
 assets/rpk.js       签名块解析 / 生成、X.509 自签、重打包
@@ -95,6 +101,7 @@ assets/bundle.js    打包产物，页面实际加载它
 vendor/fflate.js    DEFLATE / ZIP 实现
 build.mjs           构建脚本：打包并同步版本号
 docs/rpk-format.md  RPK 格式与签名的实测记录
+android/            Tauri 2 + Rust 的安卓外壳
 ```
 
 改完源码重新构建：
