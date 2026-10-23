@@ -269,7 +269,7 @@ p { margin: 0; }
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 12px 0;
+  padding: calc(var(--top-h) + 12px) 0 12px;
 }
 
 .md-nav-bar {
@@ -1374,7 +1374,7 @@ body.sheet-open .md-page { overflow-y: hidden; }
 @media (max-width: 599px) {
   .md-rail { display: none; }
   .md-nav-bar { display: grid; }
-  .md-top-bar { padding-left: 12px; }
+  .md-top-bar { padding-left: 14px; }
   .md-page__inner { padding: calc(var(--top-h) + 6px) 14px calc(104px + env(safe-area-inset-bottom)); }
   .md-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
   .md-snackbar {
@@ -1393,9 +1393,14 @@ body.sheet-open .md-page { overflow-y: hidden; }
     max-width: 880px;
     padding: calc(var(--top-h) + 14px) 28px 56px;
   }
-  .md-top-bar { padding-left: 24px; }
   .md-snackbar { bottom: 24px; }
   .md-page__head { padding-top: 12px; }
+
+  /* 顶栏让开 rail，标题与内容左边缘对齐 */
+  .md-top-bar {
+    left: 88px;
+    padding-left: max(28px, calc((100vw - 88px - 880px) / 2 + 28px));
+  }
 }
 
 @media (min-width: 900px) {
