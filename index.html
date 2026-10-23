@@ -7,11 +7,11 @@
 <link rel="icon" href="data:,">
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
-<link rel="stylesheet" href="assets/md3.css?v=202610232314">
+<link rel="stylesheet" href="assets/md3.css?v=202610232336">
 </head>
 <body>
 <div id="fatal" class="md-fatal" hidden></div>
-<script>window.__PAGE_VERSION__ = '202610232314';</script>
+<script>window.__PAGE_VERSION__ = '202610232336';</script>
 <script>
 window.addEventListener('error', function (e) {
   var bar = document.getElementById('fatal');
@@ -28,11 +28,6 @@ window.addEventListener('error', function (e) {
     </svg>
   </button>
   <h1 class="md-top-bar__title" id="topTitle">RPK Studio</h1>
-  <button class="md-icon-btn" id="settingsBtn" type="button" aria-label="设置">
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.38.12-.6l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.22-.07.46.12.6l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.38-.12.6l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.46-.12-.6l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
-    </svg>
-  </button>
 </header>
 
 <div class="md-shell">
@@ -44,7 +39,6 @@ window.addEventListener('error', function (e) {
       <section class="md-page" data-page="overview">
         <div class="md-page__inner">
           <div class="md-page__head">
-            <h2 class="md-headline-small">包</h2>
             <p class="md-body-medium md-muted">读结构、验签名。左右滑动可切换页面。</p>
           </div>
 
@@ -87,7 +81,6 @@ window.addEventListener('error', function (e) {
       <section class="md-page" data-page="edit">
         <div class="md-page__inner">
           <div class="md-page__head">
-            <h2 class="md-headline-small">编辑</h2>
             <p class="md-body-medium md-muted">应用信息、图标与包内资源。</p>
           </div>
 
@@ -158,7 +151,6 @@ window.addEventListener('error', function (e) {
       <section class="md-page" data-page="export">
         <div class="md-page__inner">
           <div class="md-page__head">
-            <h2 class="md-headline-small">导出</h2>
             <p class="md-body-medium md-muted">设好签名身份，导出时重新打包并签名。</p>
           </div>
 
@@ -226,50 +218,103 @@ window.addEventListener('error', function (e) {
         </div>
       </section>
 
+      <section class="md-page" data-page="settings">
+        <div class="md-page__inner">
+          <div class="md-page__head">
+            <p class="md-body-medium md-muted">外观、隐私与许可。</p>
+          </div>
+
+          <div class="md-card md-card--outlined md-stack">
+            <div class="md-card__head"><span class="md-title-medium">外观</span></div>
+            <div class="md-segmented" id="themeSeg" role="group" aria-label="外观">
+              <button type="button" data-theme-choice="auto" aria-pressed="true">跟随系统</button>
+              <button type="button" data-theme-choice="light" aria-pressed="false">浅色</button>
+              <button type="button" data-theme-choice="dark" aria-pressed="false">深色</button>
+            </div>
+            <p class="md-body-small md-muted" id="themeHint">跟随系统设置自动切换。</p>
+          </div>
+
+          <div class="md-card md-card--outlined md-stack">
+            <div class="md-card__head"><span class="md-title-medium">隐私</span></div>
+            <p class="md-body-small md-prose">
+              本工具是一个纯前端页面。文件的读取、解析、图片处理、打包与签名全部在你的浏览器内完成，
+              <strong>运行期间不向任何服务器发送文件、文件名或包内容</strong>。
+            </p>
+            <p class="md-body-small md-prose">
+              页面不加载分析、广告、追踪脚本，不使用 Cookie，不引用第三方 CDN 或远程字体；
+              DEFLATE 与 ZIP 实现随页面一起分发。
+            </p>
+            <p class="md-body-small md-prose">
+              本地只保存一项偏好：<code>rpk-theme</code>（外观选择，值为 auto / light / dark），
+              可在浏览器中清除本站数据删除。除此之外不写入 localStorage、IndexedDB 或缓存。
+            </p>
+            <p class="md-body-small md-prose">
+              生成的私钥仅存在于当前页面的内存中。刷新、关闭标签页或浏览器回收页面后即丢失，
+              除非你主动点击「导出签名身份」把 private.pem 保存到本地。
+            </p>
+          </div>
+
+          <div class="md-card md-card--outlined md-stack">
+            <div class="md-card__head"><span class="md-title-medium">安全提示</span></div>
+            <ul class="md-legal">
+              <li>导出的 <code>private.pem</code> 等同于该应用的发布身份。任何人拿到它都能冒充你发布更新，请勿上传网盘或提交到仓库。</li>
+              <li>私钥在页面内以明文形式存在于内存（WebCrypto 的 non-extractable 模式无法导出，因此导出功能要求可导出密钥）。共用设备上操作后建议刷新页面。</li>
+              <li>更换签名后，与原手机端配对的应用（含同步器、依赖互联通信的快应用）会拒绝通信；修改包名会被系统视为新应用，旧数据不迁移。</li>
+            </ul>
+          </div>
+
+          <div class="md-card md-card--outlined md-stack">
+            <div class="md-card__head"><span class="md-title-medium">许可</span></div>
+            <p class="md-body-small md-prose">
+              本工具源码以 <strong>MIT License</strong> 发布，可自由使用、修改与再分发，需保留版权声明与许可声明。
+            </p>
+            <p class="md-body-small md-prose">
+              第三方组件：<code>fflate</code>（MIT）提供 DEFLATE 与 ZIP 读写；
+              其余代码为项目自身实现，无运行时第三方脚本。
+            </p>
+            <p class="md-body-small md-prose">
+              「小米」「Vela」「快应用」等名称与标识归各自权利人所有。本项目是独立的第三方工具，
+              与小米科技、华米科技及其关联公司无隶属、合作或背书关系，也未获其授权。
+            </p>
+          </div>
+
+          <div class="md-card md-card--outlined md-stack">
+            <div class="md-card__head"><span class="md-title-medium">免责声明</span></div>
+            <p class="md-body-small md-prose">
+              本工具按「现状」提供，不附带任何明示或暗示的担保，包括但不限于适销性、特定用途适用性与不侵权担保。
+              作者不对因使用本工具导致的设备异常、数据丢失、应用失效或任何间接损失承担责任。
+            </p>
+            <p class="md-body-small md-prose">
+              修改与重新分发 RPK 可能受原应用的最终用户许可协议或开源许可约束。
+              若原项目使用 AGPL 等传染性许可，分发修改版需同样开源；请在使用前自行确认你有权这样做。
+            </p>
+            <p class="md-body-small md-prose">
+              本工具不提供、不托管、不分发任何应用本体，也不绕过任何付费或授权机制。
+            </p>
+          </div>
+
+          <div class="md-card md-card--filled md-stack">
+            <div class="md-card__head"><span class="md-title-medium">关于</span></div>
+            <dl class="md-kv">
+              <dt>版本</dt><dd>2.1 · Material 3</dd>
+              <dt>签名格式</dt><dd>RPK Sig Block 42</dd>
+              <dt>算法</dt><dd>RSA-2048 / SHA-256</dd>
+              <dt>运行</dt><dd>纯前端 · 无后端</dd>
+            </dl>
+            <div class="md-row">
+              <a class="md-btn md-btn--text" href="https://github.com/hrk666666/rpk-studio" target="_blank" rel="noopener">源码</a>
+              <a class="md-btn md-btn--text" href="https://github.com/hrk666666/rpk-studio/blob/main/LICENSE" target="_blank" rel="noopener">MIT 许可全文</a>
+              <a class="md-btn md-btn--text" href="docs/rpk-format.md">格式说明</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
     </div>
   </div>
 </div>
 
 <nav class="md-nav-bar" id="navBar" aria-label="主导航"></nav>
-
-<section class="md-layer" id="settingsLayer" data-layer="settings" aria-hidden="true">
-  <header class="md-layer__bar">
-    <button class="md-icon-btn" type="button" data-back aria-label="返回">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/>
-      </svg>
-    </button>
-    <h2 class="md-layer__title">设置</h2>
-  </header>
-
-  <div class="md-layer__body">
-    <div class="md-layer__inner">
-      <div class="md-card md-card--outlined md-stack">
-        <div class="md-card__head"><span class="md-title-medium">外观</span></div>
-        <div class="md-segmented" id="themeSeg" role="group" aria-label="外观">
-          <button type="button" data-theme-choice="auto" aria-pressed="true">跟随系统</button>
-          <button type="button" data-theme-choice="light" aria-pressed="false">浅色</button>
-          <button type="button" data-theme-choice="dark" aria-pressed="false">深色</button>
-        </div>
-        <p class="md-body-small md-muted" id="themeHint">跟随系统设置自动切换。</p>
-      </div>
-
-      <div class="md-card md-card--filled md-stack">
-        <div class="md-card__head"><span class="md-title-medium">关于</span></div>
-        <dl class="md-kv">
-          <dt>版本</dt><dd>2.0 · Material 3</dd>
-          <dt>内核</dt><dd>RPK Sig Block 42</dd>
-          <dt>签名</dt><dd>RSA-2048 / SHA-256</dd>
-          <dt>运行</dt><dd>全部在本机完成</dd>
-        </dl>
-        <div class="md-row">
-          <a class="md-btn md-btn--text" href="https://github.com/hrk666666/rpk-studio" target="_blank" rel="noopener">源码仓库</a>
-          <a class="md-btn md-btn--text" href="docs/rpk-format.md">格式说明</a>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
 
 <section class="md-layer md-layer--editor" id="editorLayer" data-layer="editor" aria-hidden="true">
   <header class="md-layer__bar">
@@ -364,6 +409,6 @@ window.addEventListener('error', function (e) {
 
 <div class="md-snackbar" id="snackbar" role="status" aria-live="polite"></div>
 
-<script src="assets/bundle.js?v=202610232314" defer></script>
+<script src="assets/bundle.js?v=202610232336" defer></script>
 </body>
 </html>
