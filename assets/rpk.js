@@ -92,9 +92,22 @@ function randomSerial() {
 
 const SHA256_RSA = () => seq(derOid('1.2.840.113549.1.1.11'), nullDer());
 
-export async function createIdentity(cn, days = 3650, existing = null) {
-  let key = existing?.key;
-  let spki = existing?.pubDer;
+export async function createIdentity(opts, daysArg = 3650, existingArg = null) {
+  let optsObj;
+  if (typeof opts === 'string' || opts == null) {
+    optsObj = { cn: opts || '', days: daysArg, existing: existingArg };
+  } else {
+    optsObj = opts;
+  }
+
+  const cn = (optsObj.cn || '').trim() || 'RPK Studio';
+  const o = (optsObj.o || '').trim();
+  const ou = (optsObj.ou || '').trim();
+  const c = (optsObj.c || '').trim().toUpperCase().slice(0, 2);
+  const days = clampDays(optsObj.days);
+
+  let key = optsObj.key || optsObj.existing?.key;
+  let spki = optsObj.existing?.pubDer;
   if (!key) {
     const pair = await crypto.subtle.generateKey(
       { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
@@ -103,10 +116,18 @@ export async function createIdentity(cn, days = 3650, existing = null) {
     key = pair.privateKey;
     spki = new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey));
   }
+  if (!spki) spki = await spkiOf(key);
+
   const now = new Date();
   const exp = new Date(now.getTime() + days * 86400000);
 
-  const name = seq(set(seq(derOid('2.5.4.3'), utf8(cn))));
+  const rdns = [];
+  if (c) rdns.push(set(seq(derOid('2.5.4.6'), utf8(c))));
+  if (o) rdns.push(set(seq(derOid('2.5.4.10'), utf8(o))));
+  if (ou) rdns.push(set(seq(derOid('2.5.4.11'), utf8(ou))));
+  rdns.push(set(seq(derOid('2.5.4.3'), utf8(cn))));
+  const name = seq(...rdns);
+
   const tbs = seq(
     tlv(0xa0, derInt(Uint8Array.of(2))),
     derInt(randomSerial()),
@@ -122,21 +143,32 @@ export async function createIdentity(cn, days = 3650, existing = null) {
   let pkcs8 = null;
   try { pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', key)); } catch {}
 
-  return { key, certDer: cert, pubDer: spki, cn, notBefore: now, notAfter: exp, pkcs8 };
+  return { key, certDer: cert, pubDer: spki, cn, o, ou, c, notBefore: now, notAfter: exp, pkcs8 };
 }
 
-export async function importPrivateKey(pem) {
-  let der = pemToDer(pem);
-  if (/BEGIN RSA PRIVATE KEY/.test(pem)) {
-    der = seq(derInt(Uint8Array.of(0)), seq(derOid('1.2.840.113549.1.1.1'), nullDer()), tlv(0x04, der));
-  }
-  const key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, true, ['sign']);
+function clampDays(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return 3650;
+  return Math.min(36500, Math.max(1, Math.round(n)));
+}
+
+async function spkiOf(key) {
   const jwk = await crypto.subtle.exportKey('jwk', key);
   const pub = await crypto.subtle.importKey(
     'jwk', { kty: 'RSA', n: jwk.n, e: jwk.e, ext: true },
     { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, true, ['verify']
   );
-  const spki = new Uint8Array(await crypto.subtle.exportKey('spki', pub));
+  return new Uint8Array(await crypto.subtle.exportKey('spki', pub));
+}
+
+export async function importPrivateKey(input, kind = null) {
+  let der = typeof input === 'string' ? pemToDer(input) : input;
+  const isPkcs1 = kind === 'pkcs1' || (typeof input === 'string' && /BEGIN RSA PRIVATE KEY/.test(input));
+  if (isPkcs1) {
+    der = seq(derInt(Uint8Array.of(0)), seq(derOid('1.2.840.113549.1.1.1'), nullDer()), tlv(0x04, der));
+  }
+  const key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, true, ['sign']);
+  const spki = await spkiOf(key);
   return { key, pubDer: spki };
 }
 

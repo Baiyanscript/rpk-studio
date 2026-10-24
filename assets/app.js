@@ -1,8 +1,8 @@
-import { inspect, repack, createIdentity, importPrivateKey, sha256, measureImage } from './rpk.js';
-import { dataOf } from './zip.js';
-import { Zip, ZipDeflate } from '../vendor/fflate.js';
+import { inspect, repack, createIdentity, importPrivateKey, parseCertificate, sha256, pngSize } from './rpk.js';
+import { readZip, dataOf, crc32 } from './zip.js';
 
 const BUILD = __BUILD__;
+const VERSION = { code: 2300, name: '2.3.0' };
 
 (function syncVersion() {
   if (window.__PAGE_VERSION__ === BUILD) return;
@@ -10,20 +10,52 @@ const BUILD = __BUILD__;
     const key = `rpk-reload-${BUILD}`;
     if (sessionStorage.getItem(key)) return;
     sessionStorage.setItem(key, '1');
-  } catch {}
+  } catch { }
   const u = new URL(location.href);
   u.searchParams.set('v', BUILD);
   location.replace(u.toString());
 })();
 
 const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+};
+const fmtSize = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const te = new TextEncoder();
+const hexUpper = b => [...b].map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+const raf = () => new Promise(r => requestAnimationFrame(() => r()));
+const yieldToUI = () => new Promise(resolve => {
+  if (typeof scheduler !== 'undefined' && typeof scheduler.yield === 'function') {
+    scheduler.yield().then(resolve, resolve);
+    return;
+  }
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => { ch.port1.close(); resolve(); };
+  ch.port2.postMessage(0);
+});
 
 const PAGES = [
   { id: 'overview', label: '包', path: 'M12 2 3 6.5v11L12 22l9-4.5v-11L12 2zm0 2.2 6.5 3.2L12 10.6 5.5 7.4 12 4.2z' },
   { id: 'edit', label: '编辑', path: 'M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.7 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z' },
-  { id: 'export', label: '导出', path: 'M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.4-1.4L11 12.2V3zM5 19h14v2H5z' },
+  { id: 'toolbox', label: '工具箱', path: 'M21 6h-2.6l-1.2-1.8A2 2 0 0 0 15.5 3h-7a2 2 0 0 0-1.7 1.2L5.6 6H3a1 1 0 0 0-1 1v4h2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8h2V7a1 1 0 0 0-1-1zm-9 0h3l.8 1H11l.8-1z' },
+  { id: 'history', label: '历史', path: 'M13 3a9 9 0 1 0 8.5 12h-2.2A7 7 0 1 1 13 5v3l4-4-4-4v3zm-1 5v5l4 2 .8-1.3-3.3-2V8H12z' },
   { id: 'settings', label: '设置', path: 'M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.38.12-.6l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.22-.07.46.12.6l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.38-.12.6l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.46-.12-.6l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z' },
 ];
+
+const DEFAULT_SETTINGS = {
+  theme: 'auto',
+  optVerify: true,
+  optWatch: true,
+  record: true,
+  storeFiles: true,
+  autoIdentity: true,
+  updAuto: true,
+  updMirror: '',
+};
 
 const S = {
   pkg: null,
@@ -36,81 +68,59 @@ const S = {
   fileName: '',
   busy: false,
   pending: null,
-  optVerify: true,
-  optWatch: true,
   dupes: null,
   layer: null,
   stale: false,
   lastExport: null,
+  settings: { ...DEFAULT_SETTINGS },
+  idMode: 'auto',
+  tbOs: 'os4',
+  tbCatalog: null,
+  history: [],
 };
 
-const fmtSize = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
-const hexUpper = b => [...b].map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const te = new TextEncoder();
-
-/* ---------- 调度 ---------- */
-
-const yieldToUI = () => new Promise(resolve => {
-  if (typeof scheduler !== 'undefined' && typeof scheduler.yield === 'function') {
-    scheduler.yield().then(resolve, resolve);
-    return;
-  }
-  const ch = new MessageChannel();
-  ch.port1.onmessage = () => { ch.port1.close(); resolve(); };
-  ch.port2.postMessage(0);
-});
-
-const raf = () => new Promise(r => requestAnimationFrame(() => r()));
+/* ---------- 提示 / 遮罩 ---------- */
 
 let snackTimer = null;
 function snack(text) {
   const bar = $('snackbar');
   bar.textContent = text;
   bar.classList.add('is-open');
+  document.body.classList.add('snack-open');
   clearTimeout(snackTimer);
-  snackTimer = setTimeout(() => bar.classList.remove('is-open'), 3600);
+  snackTimer = setTimeout(() => {
+    bar.classList.remove('is-open');
+    document.body.classList.remove('snack-open');
+  }, 3800);
 }
 
-const el = (tag, cls, text) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text != null) n.textContent = text;
-  return n;
-};
-
-/* ---------- 忙碌遮罩 ---------- */
-
 let scrimTimer = null;
-
 function showScrim(text, sub = '') {
-  $('scrimText').textContent = text;
-  $('scrimSub').textContent = sub;
-  const bar = $('scrimBar');
-  bar.hidden = true;
-  bar.firstElementChild.style.width = '0%';
   clearTimeout(scrimTimer);
   scrimTimer = setTimeout(() => {
+    $('scrimText').textContent = text;
+    $('scrimSub').textContent = sub;
     $('scrim').hidden = false;
     document.body.classList.add('is-busy');
   }, 140);
 }
-
 function setScrimProgress(done, total, label) {
-  if (total <= 0) return;
+  if (!$('scrim') || $('scrim').hidden) return;
   const bar = $('scrimBar');
-  if (bar.hidden) bar.hidden = false;
-  bar.firstElementChild.style.width = `${Math.round((done / total) * 100)}%`;
-  if (label) $('scrimSub').textContent = `${label} ${done} / ${total}`;
+  bar.hidden = false;
+  bar.firstElementChild.style.width = total ? `${Math.round(done / total * 100)}%` : '0%';
+  if (label) $('scrimText').textContent = label;
+  $('scrimSub').textContent = total ? `${done} / ${total}` : '';
 }
-
 function hideScrim() {
   clearTimeout(scrimTimer);
   $('scrim').hidden = true;
+  $('scrimBar').hidden = true;
+  $('scrimBar').firstElementChild.style.width = '0%';
   document.body.classList.remove('is-busy');
 }
 
-/* ---------- 通用 ---------- */
+/* ---------- 保存 / 分享 ---------- */
 
 const IN_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -123,15 +133,20 @@ function bytesToBase64(bytes) {
   return btoa(bin);
 }
 
-// 网页走 a[download]；Tauri（含 Android）交给 Rust 写入并调系统面板
+function download(name, bytes) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
 async function saveBlob(name, bytes) {
   if (IN_TAURI) {
     try {
-      const path = await window.__TAURI__.core.invoke('save_bytes', {
-        name,
-        base64: bytesToBase64(bytes),
-      });
-      if (path) snack(`已保存到 ${path.split(/[\\/]/).pop()}`);
+      const path = await window.__TAURI__.core.invoke('save_bytes', { name, base64: bytesToBase64(bytes) });
+      if (path) snack(`已保存 ${String(path).split(/[\\/]/).pop()}`);
       return true;
     } catch (e) {
       snack(`保存失败：${e}`);
@@ -152,39 +167,222 @@ async function shareBlob(name, bytes) {
       return false;
     }
   }
-
   const file = new File([bytes], name, { type: 'application/octet-stream' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: name });
       return true;
-    } catch {}
+    } catch { }
   }
-
   download(name, bytes);
   return true;
 }
 
-function download(name, bytes) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+/* ---------- 本地存储：IndexedDB ---------- */
+
+const DB_NAME = 'rpk-studio';
+const DB_VER = 1;
+let dbPromise = null;
+
+function openDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('history')) {
+        const st = db.createObjectStore('history', { keyPath: 'id' });
+        st.createIndex('at', 'at');
+      }
+      if (!db.objectStoreNames.contains('kv')) {
+        db.createObjectStore('kv', { keyPath: 'k' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
 }
 
-const entryByName = n => S.pkg?.entries.find(e => e.name === n) || null;
-const imageBytes = n => S.images[n] || (entryByName(n) ? dataOf(entryByName(n)) : null);
-const iconName = () => (S.pkg?.manifest?.icon || '/common/icon.png').replace(/^\//, '');
+async function dbPut(store, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).put(value);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
 
-function imgMeta(name) {
-  const meta = S.pkg?.images.find(i => i.name === name);
-  if (!meta) return null;
-  if (!meta.w && meta.entry) {
-    const size = measureImage(meta.entry) || S.sizes.get(name);
-    if (size) { meta.w = size.w; meta.h = size.h; S.sizes.set(name, size); }
+async function dbAll(store) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbGet(store, key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbDel(store, key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).delete(key);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function dbClear(store) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).clear();
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function saveSettings() {
+  try { localStorage.setItem('rpk-settings', JSON.stringify(S.settings)); } catch { }
+}
+
+function loadSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('rpk-settings') || '{}');
+    S.settings = { ...DEFAULT_SETTINGS, ...raw };
+  } catch {
+    S.settings = { ...DEFAULT_SETTINGS };
   }
-  return meta;
+}
+
+/* ---------- 历史记录 ---------- */
+
+const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+async function addHistory(rec, bytes) {
+  if (!S.settings.record) return;
+  const item = {
+    id: uid(),
+    at: Date.now(),
+    kind: rec.kind,
+    file: rec.file || '',
+    pkg: rec.pkg || '',
+    name: rec.name || '',
+    version: rec.version || '',
+    size: rec.size || 0,
+    verified: rec.verified ?? null,
+    hasBlob: Boolean(bytes) && S.settings.storeFiles,
+  };
+  if (item.hasBlob) item.blob = new Blob([bytes], { type: 'application/octet-stream' });
+  await dbPut('history', item);
+  await refreshHistory();
+}
+
+async function refreshHistory() {
+  S.history = await dbAll('history');
+  S.history.sort((a, b) => b.at - a.at);
+  renderHistory();
+  updateStorageHint();
+}
+
+function timeLabel(ts) {
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, '0');
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return hm;
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
+}
+
+function renderHistory() {
+  const ul = $('histList');
+  ul.textContent = '';
+  $('histEmpty').hidden = S.history.length > 0;
+  $('clearHistory').disabled = S.history.length === 0;
+
+  for (const item of S.history) {
+    const li = document.createElement('li');
+    const btn = el('button', 'md-history__item');
+    btn.type = 'button';
+
+    const kind = el('span', `md-history__kind md-history__kind--${item.kind === 'export' ? 'export' : 'load'}`,
+      item.kind === 'export' ? '导出' : '载入');
+
+    const body = el('span', 'md-history__body');
+    body.append(
+      el('span', 'md-body-medium', item.pkg || item.file || '—'),
+      el('span', 'md-history__meta',
+        [item.name, item.version, item.size ? fmtSize(item.size) : '', item.hasBlob ? '' : '仅元数据'].filter(Boolean).join(' · ')),
+    );
+    btn.append(kind, body, el('span', 'md-history__time', timeLabel(item.at)));
+    btn.addEventListener('click', () => openHistorySheet(item));
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+}
+
+function openHistorySheet(item) {
+  const actions = [];
+  if (item.hasBlob) {
+    actions.push({
+      label: '继续编辑',
+      icon: 'M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.7 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
+      onPick: () => continueFromHistory(item),
+    });
+    actions.push({
+      label: '另存为',
+      icon: 'M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.4-1.4L11 12.2V3zM5 19h14v2H5z',
+      onPick: async () => {
+        const buf = new Uint8Array(await item.blob.arrayBuffer());
+        await saveBlob(item.file || `${item.pkg || 'package'}.rpk`, buf);
+      },
+    });
+  }
+  actions.push({
+    label: '删除记录',
+    icon: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+    danger: true,
+    onPick: async () => {
+      await dbDel('history', item.id);
+      await refreshHistory();
+      snack('已删除');
+    },
+  });
+  openSheet(item.pkg || item.file || '记录', actions);
+}
+
+async function continueFromHistory(item) {
+  if (!item.blob) { snack('这条记录没有保存文件'); return; }
+  const buf = await item.blob.arrayBuffer();
+  const file = new File([buf], item.file || 'restored.rpk', { type: 'application/octet-stream' });
+  await loadFile(file, { fromHistory: true });
+  goTo(1, true);
+}
+
+async function updateStorageHint() {
+  const n = S.history.length;
+  let bytes = 0;
+  for (const h of S.history) if (h.blob) bytes += h.blob.size;
+  const id = S.identity ? 1 : 0;
+  $('histUsage').textContent = n ? `${n} 条记录 · ${fmtSize(bytes)}` : '暂无记录';
+  $('storageHint').textContent = `${n} 条 · ${fmtSize(bytes)}${id ? ' · 已保存身份' : ''}`;
+  $('stUsage').textContent = '';
+  $('stUsage').append(
+    el('dt', null, '历史'), el('dd', null, `${n} 条 · ${fmtSize(bytes)}`),
+    el('dt', null, '签名'), el('dd', null, id ? '已保存' : '未保存'),
+  );
 }
 
 /* ---------- 导航 ---------- */
@@ -232,6 +430,8 @@ function goTo(index, animate = true) {
     S.stale = false;
     if (S.tab === 'files') renderFiles(); else renderImages();
   }
+  if (index === 3) refreshHistory();
+  if (index === 4) renderSettingsPage();
 }
 
 /* ---------- 横向手势 ---------- */
@@ -269,7 +469,7 @@ $('pager').addEventListener('pointermove', e => {
     if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
     swipe.axis = Math.abs(dx) > Math.abs(dy) * 1.1 ? 'x' : 'y';
     if (swipe.axis === 'y') { swipe = null; return; }
-    try { $('pager').setPointerCapture(e.pointerId); } catch {}
+    try { $('pager').setPointerCapture(e.pointerId); } catch { }
     document.body.classList.add('is-swiping');
   }
 
@@ -307,7 +507,6 @@ $('pager').addEventListener('pointercancel', () => {
   if (swipe) { const p = S.page; swipe = null; setTrack(-p * pageWidth(), true); }
 });
 
-// 横向拖动结束后吞掉随之而来的 click，避免误开卡片
 let suppressClick = false;
 document.addEventListener('click', e => {
   if (!suppressClick) return;
@@ -316,7 +515,7 @@ document.addEventListener('click', e => {
   e.preventDefault();
 }, true);
 
-/* ---------- 底栏收起 ---------- */
+/* ---------- 顶栏与底栏收放 ---------- */
 
 const navBar = $('navBar');
 let navHidden = false;
@@ -369,6 +568,8 @@ function showLayer(name) {
   el.classList.add('is-open');
   el.setAttribute('aria-hidden', 'false');
   hideNavBar();
+  $('backBtn').hidden = false;
+  history.pushState({ layer: name }, '', location.href);
 }
 
 function hideLayer(name) {
@@ -376,35 +577,31 @@ function hideLayer(name) {
   if (!el) return;
   el.classList.remove('is-open');
   el.setAttribute('aria-hidden', 'true');
-  S.layer = null;
-  setTimeout(() => { if (!S.layer) showNavBar(); }, 200);
+  if (S.layer === name) S.layer = null;
+  $('backBtn').hidden = true;
+  showNavBar();
 }
 
 function openLayer(name) {
-  if (S.layer === name) return;
-  history.pushState({ rpkLayer: name }, '');
   showLayer(name);
 }
 
 function closeLayer() {
   if (!S.layer) return;
-  history.back();
+  const name = S.layer;
+  hideLayer(name);
+  if (history.state && history.state.layer) {
+    try { history.back(); } catch { }
+  }
 }
 
-window.addEventListener('popstate', () => {
-  if (S.layer) hideLayer(S.layer);
-});
+$('backBtn').addEventListener('click', () => closeLayer());
 
-window.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    if (sheetOpen) { closeSheet(); return; }
-    if (S.layer) { closeLayer(); return; }
-    return;
+window.addEventListener('popstate', () => {
+  if (S.layer) {
+    const name = S.layer;
+    hideLayer(name);
   }
-  if (S.layer || sheetOpen) return;
-  if (e.target.matches('input, textarea, select')) return;
-  if (e.key === 'ArrowLeft') { goTo(S.page - 1, true); showNavBar(); }
-  else if (e.key === 'ArrowRight') { goTo(S.page + 1, true); showNavBar(); }
 });
 
 /* ---------- 底部弹层 ---------- */
@@ -417,22 +614,29 @@ function openSheet(title, items) {
   $('sheetTitle').textContent = title;
   const list = $('sheetList');
   list.textContent = '';
-  for (const item of items) {
-    const b = el('button', `md-sheet-item${item.danger ? ' is-danger' : ''}`);
+
+  for (const it of items) {
+    const b = el('button', 'md-sheet-item' + (it.danger ? ' is-danger' : ''));
     b.type = 'button';
-    b.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${item.icon}"/></svg><span>${item.label}</span>`;
-    b.addEventListener('click', () => {
+    if (it.icon) {
+      const span = el('span', 'md-sheet-item__icon');
+      span.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${it.icon}"/></svg>`;
+      b.appendChild(span);
+    }
+    b.appendChild(el('span', 'md-grow', it.label));
+    b.addEventListener('click', async () => {
       closeSheet();
-      item.onPick?.();
+      await it.onPick();
     });
     list.appendChild(b);
   }
-  $('sheetScrim').hidden = false;
-  $('sheet').setAttribute('aria-hidden', 'false');
+
   clearTimeout(sheetTimer);
+  $('sheetScrim').hidden = false;
   requestAnimationFrame(() => {
     $('sheetScrim').classList.add('is-open');
     $('sheet').classList.add('is-open');
+    $('sheet').setAttribute('aria-hidden', 'false');
   });
   sheetOpen = true;
 }
@@ -441,122 +645,190 @@ function closeSheet() {
   if (!sheetOpen) return;
   sheetOpen = false;
   document.body.classList.remove('sheet-open');
-  $('sheetScrim').classList.remove('is-open');
   $('sheet').classList.remove('is-open');
+  $('sheetScrim').classList.remove('is-open');
   $('sheet').setAttribute('aria-hidden', 'true');
   clearTimeout(sheetTimer);
-  sheetTimer = setTimeout(() => { $('sheetScrim').hidden = true; }, 240);
+  sheetTimer = setTimeout(() => { $('sheetScrim').hidden = true; }, 220);
 }
 
 $('sheetScrim').addEventListener('click', closeSheet);
 
-/* ---------- 渲染：概览 ---------- */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (sheetOpen) { closeSheet(); return; }
+  if (S.layer) closeLayer();
+});
+
+/* ---------- 概览 ---------- */
 
 function setChip(state, text) {
-  const c = $('badge');
-  c.className = `md-chip${state ? ' md-chip--' + state : ''}`;
-  c.textContent = text;
-}
-
-function renderForm() {
-  const m = S.pkg?.manifest;
-  const on = Boolean(m);
-  for (const id of ['fName', 'fPackage', 'fVersionName', 'fVersionCode']) $(id).disabled = !on;
-  $('pickIcon').disabled = !on;
-  $('search').disabled = !on;
-  $('exportBtn').disabled = !on || !S.identity || S.busy;
-  if (!m) {
-    $('detailState').textContent = '载入包后可编辑';
-    return;
-  }
-  $('fName').value = m.name || '';
-  $('fPackage').value = m.package || '';
-  $('fVersionName').value = m.versionName || '';
-  $('fVersionCode').value = m.versionCode ?? '';
-
-  const icon = imageBytes(iconName()) || S.pkg.icon;
-  const box = $('iconPreview');
-  if (box.dataset.url) { URL.revokeObjectURL(box.dataset.url); delete box.dataset.url; }
-  box.textContent = '';
-  if (icon) {
-    const url = URL.createObjectURL(new Blob([icon], { type: 'image/png' }));
-    box.dataset.url = url;
-    const img = new Image();
-    img.src = url;
-    img.onload = () => { $('iconHint').textContent = `${img.naturalWidth} × ${img.naturalHeight} PNG`; };
-    img.onerror = () => { $('iconHint').textContent = '图标解码失败'; };
-    box.appendChild(img);
-  }
+  const chip = $('badge');
+  chip.className = `md-chip${state ? ' is-' + state : ''}`;
+  chip.textContent = text;
 }
 
 function renderKV() {
   const kv = $('kv');
   kv.textContent = '';
-  if (!S.pkg) {
-    for (const k of ['包名', '应用名', '版本', '版本号', '页面', '文件', '体积', '平台版本']) {
-      kv.append(el('dt', null, k), el('dd', null, '—'));
-    }
-    return;
-  }
-  const { manifest, entries, bytes, sig } = S.pkg;
-  const rows = [
-    ['包名', manifest?.package || '—'],
-    ['应用名', manifest?.name || '—'],
-    ['版本', manifest?.versionName || '—'],
-    ['版本号', String(manifest?.versionCode ?? '—')],
-    ['页面', String(manifest?.router?.pages ? Object.keys(manifest.router.pages).length : 0)],
-    ['文件', String(entries.filter(e => !e.isDir).length)],
-    ['体积', fmtSize(bytes.length)],
-    ['平台版本', String(manifest?.minPlatformVersion ?? '—')],
+  const rows = S.pkg ? [
+    ['包名', S.pkg.manifest?.package || '—'],
+    ['名称', S.pkg.manifest?.name || '—'],
+    ['版本', S.pkg.manifest?.versionName || '—'],
+    ['版本号', String(S.pkg.manifest?.versionCode ?? '—')],
+    ['页面', String(S.pkg.manifest?.pages?.length ?? '—')],
+    ['文件', `${S.pkg.entries.length}`],
+    ['图片', `${S.pkg.images.length}`],
+    ['体积', fmtSize(S.pkg.bytes.length)],
+  ] : [
+    ['包名', '—'], ['名称', '—'], ['版本', '—'], ['版本号', '—'],
+    ['页面', '—'], ['文件', '—'], ['图片', '—'], ['体积', '—'],
   ];
   for (const [k, v] of rows) kv.append(el('dt', null, k), el('dd', null, v));
 }
 
 function renderVerify() {
   const box = $('verify');
-  const pkg = S.pkg;
-  if (!pkg) {
-    box.textContent = '';
-    setChip('', '等待文件');
-    return;
-  }
-  if (!pkg.sig?.present) {
-    box.textContent = '';
-    box.appendChild(el('p', 'md-body-small md-muted', '这个包没有 META-INF 签名块。'));
-    setChip('', '未签名');
-    return;
-  }
-  if (!pkg.verify) {
-    box.textContent = '';
-    const row = el('div', 'md-verify__pending');
-    row.append(el('span', 'md-spinner md-spinner--sm'), el('span', 'md-body-small md-muted', '正在校验签名…'));
-    box.appendChild(row);
-    setChip('warn', '校验中');
-    return;
-  }
-  const v = pkg.verify;
   box.textContent = '';
-  const line = (label, right) => {
-    const row = el('div', 'md-row');
-    row.append(el('span', 'md-body-small md-muted', label), el('span', 'md-body-small', right));
-    box.appendChild(row);
+  if (!S.pkg) {
+    box.appendChild(el('p', 'md-body-small md-muted', '载入包后显示校验结果'));
+    return;
+  }
+  const v = S.pkg.verify;
+  const row = (label, ok, text) => {
+    const r = el('div', 'md-row md-row--between');
+    r.append(el('span', 'md-body-small md-muted', label), el('span', `md-chip${ok ? ' is-ok' : ' is-bad'}`, text));
+    box.appendChild(r);
   };
-  line('分段摘要', v.digestOk ? '一致' : '不一致');
-  line('RSA 签名', v.rsaOk ? '有效' : '无效');
-  line('文件摘要', `${v.fileCount - v.badFiles} / ${v.fileCount}`);
-  line(v.cert.cn || '证书', v.cert.notAfter ? v.cert.notAfter.toISOString().slice(0, 10) : '—');
-  const ok = v.digestOk && v.rsaOk && v.badFiles === 0;
-  setChip(ok ? 'ok' : 'bad', ok ? '签名有效' : '校验失败');
+  if (!v) {
+    row('签名块', false, '不存在');
+    return;
+  }
+  row('RSA 验签', v.rsaOk, v.rsaOk ? '通过' : '失败');
+  row('三段摘要', v.digestOk, v.digestOk ? '匹配' : '不匹配');
+  row('文件摘要', v.badFiles === 0, v.badFiles === 0 ? `${v.fileCount} 项一致` : `${v.badFiles} 项异常`);
+  if (S.pkg.sig?.certDer) {
+    const info = el('p', 'md-body-small md-muted');
+    info.textContent = `证书：${S.pkg.verify.cert?.cn || '未知'} · ${S.pkg.sig.signature.length * 8} 位签名`;
+    box.appendChild(info);
+  }
 }
 
 function renderNotice() {
   const box = $('notice');
   const pkg = S.pkg;
-  if (!pkg?.embedded) { box.classList.add('hidden'); return; }
-  box.classList.remove('hidden');
-  box.textContent = pkg.embedded.jsc
-    ? `包内 ${pkg.embedded.source} 是 JSC 字节码，其中另存了一份编译时的 manifest。改包名或版本只改外层 JSON，握手指令仍会读字节码里的旧值。`
-    : `包内 ${pkg.embedded.source} 是未压缩脚本，manifest 副本与外层一致时无需处理。`;
+  if (!pkg) { box.hidden = true; return; }
+  const emb = pkg.embedded;
+  if (!emb || !emb.text) { box.hidden = true; return; }
+  const cur = String(pkg.manifest?.versionCode ?? '');
+  const old = (emb.text.match(/"versionCode":(\d+)/) || [])[1];
+  if (old && cur && old !== cur) {
+    box.hidden = false;
+    box.textContent = `注意：${emb.source} 内嵌的版本号仍为 ${old}，外层已改为 ${cur}。字节码不会随 JSON 一起变。`;
+  } else {
+    box.hidden = true;
+  }
+}
+
+/* ---------- 编辑页 ---------- */
+
+const entryByName = n => S.pkg?.entries.find(e => e.name === n) || null;
+const imageBytes = n => S.images[n] || (entryByName(n) ? dataOf(entryByName(n)) : null);
+const iconName = () => (S.pkg?.manifest?.icon || '/common/icon.png').replace(/^\//, '');
+
+function imgMeta(name) {
+  const fromSize = S.sizes.get(name);
+  if (fromSize) return fromSize;
+  const meta = S.pkg?.images.find(i => i.name === name);
+  if (!meta) return null;
+  if (!meta.w) {
+    try {
+      const d = imageBytes(name);
+      const wh = d ? pngSize(d) : null;
+      if (wh) actualSize(name, wh);
+      return { w: wh?.w || 0, h: wh?.h || 0 };
+    } catch { return { w: 0, h: 0 }; }
+  }
+  return { w: meta.w, h: meta.h };
+}
+
+function actualSize(name, wh) {
+  S.sizes.set(name, { w: wh.w, h: wh.h });
+}
+
+function renderForm() {
+  const m = S.pkg?.manifest;
+  const on = Boolean(m);
+  for (const [id, val] of [['fName', m?.name], ['fPackage', m?.package], ['fVersionName', m?.versionName], ['fVersionCode', m?.versionCode]]) {
+    const node = $(id);
+    node.disabled = !on;
+    node.value = val ?? '';
+  }
+  $('pickIcon').disabled = !on;
+  $('search').disabled = !on;
+  updateFab();
+  renderIcon();
+  if (!on) $('detailState').textContent = '载入包后可编辑';
+  else renderDirty();
+}
+
+function renderIcon() {
+  const box = $('iconPreview');
+  box.textContent = '';
+  const name = iconName();
+  const bytes = S.pkg ? imageBytes(name) : null;
+  if (!bytes) {
+    box.appendChild(el('span', 'md-body-small md-muted', '无'));
+    $('iconHint').textContent = '—';
+    return;
+  }
+  const meta = imgMeta(name);
+  const img = new Image();
+  img.src = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+  img.onload = () => URL.revokeObjectURL(img.src);
+  box.appendChild(img);
+  $('iconHint').textContent = meta?.w ? `${meta.w} × ${meta.h} PNG` : 'PNG';
+}
+
+function renderDirty() {
+  if (!S.pkg) { $('detailState').textContent = '载入包后可编辑'; return; }
+  const dirty = Object.keys(S.images).length;
+  const m = collectPatch().manifest;
+  const changed = m.name !== S.pkg.manifest.name || m.package !== S.pkg.manifest.package
+    || m.versionName !== S.pkg.manifest.versionName || Number(m.versionCode) !== Number(S.pkg.manifest.versionCode);
+  $('detailState').textContent = (changed || dirty)
+    ? `已修改${dirty ? ` · ${dirty} 张图` : ''}，导出时生效`
+    : '与包内一致';
+  updateFab();
+}
+
+function collectPatch() {
+  const base = S.pkg?.manifest || {};
+  const m = { ...base };
+  m.name = $('fName').value.trim();
+  m.package = $('fPackage').value.trim();
+  m.versionName = $('fVersionName').value.trim();
+  m.versionCode = Number($('fVersionCode').value);
+
+  const watch = S.pkg?.watch
+    ? { ...S.pkg.watch, name: m.name, package: m.package, versionName: m.versionName, versionCode: m.versionCode }
+    : null;
+  const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
+
+  return {
+    manifestText: S.pkg && changed(S.pkg.manifest, m) ? JSON.stringify(m, null, 2) + '\n' : null,
+    watchText: (S.settings.optWatch && watch && changed(S.pkg.watch, watch)) ? JSON.stringify(watch, null, 2) + '\n' : null,
+    images: S.images,
+    manifest: m,
+  };
+}
+
+function validate(m) {
+  if (!m.name) return '应用名称不能为空';
+  if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(m.package)) return '包名格式不对，应类似 com.example.app';
+  if (!m.versionName) return '版本名不能为空';
+  if (!Number.isInteger(m.versionCode) || m.versionCode <= 0) return '版本号需为正整数';
+  return null;
 }
 
 /* ---------- 文件列表 ---------- */
@@ -566,44 +838,49 @@ let fileToken = 0;
 async function renderFiles() {
   const token = ++fileToken;
   const list = $('fileList');
-  const status = $('listStatus');
   const q = ($('search').value || '').trim().toLowerCase();
   list.textContent = '';
+  const status = $('listStatus');
   status.hidden = true;
 
   if (!S.pkg) {
-    list.appendChild(el('li', 'md-list-item md-muted', '载入包后显示'));
+    list.classList.add('is-empty');
+    list.appendChild(el('p', 'md-body-small md-muted', '载入包后显示文件'));
     $('entryCount').textContent = '';
     return;
   }
-  const all = S.pkg.entries.filter(e => !e.isDir);
-  const entries = q ? all.filter(e => e.name.toLowerCase().includes(q)) : all;
-  $('entryCount').textContent = String(entries.length);
+  list.classList.remove('is-empty');
 
-  const BATCH = 50;
-  for (let i = 0; i < entries.length; i += BATCH) {
+  const all = S.pkg.entries.filter(e => !q || e.name.toLowerCase().includes(q));
+  $('entryCount').textContent = `${all.length}`;
+  const BATCH = 60;
+
+  for (let i = 0; i < all.length; i += BATCH) {
     if (token !== fileToken) return;
     const frag = document.createDocumentFragment();
-    for (const e of entries.slice(i, i + BATCH)) {
-      const li = el('li', 'md-list-item');
-      const name = el('span', 'md-list-item__name', e.name);
-      li.append(name, el('span', 'md-list-item__meta', fmtSize(e.usize)));
-      li.style.cursor = 'pointer';
-      li.addEventListener('click', () => openFileSheet(e));
+    for (const e of all.slice(i, i + BATCH)) {
+      const li = el('li');
+      const btn = el('button', 'md-list-item');
+      btn.type = 'button';
+      btn.append(
+        el('span', 'md-list-item__name', e.name),
+        el('span', 'md-list-item__meta', e.isDir ? '目录' : fmtSize(e.usize)),
+      );
+      btn.addEventListener('click', () => openFileSheet(e));
+      li.appendChild(btn);
       frag.appendChild(li);
     }
     list.appendChild(frag);
-    if (entries.length > BATCH) {
+    if (all.length > BATCH) {
       status.hidden = false;
-      status.textContent = `已显示 ${Math.min(i + BATCH, entries.length)} / ${entries.length}`;
+      status.textContent = `已显示 ${Math.min(i + BATCH, all.length)} / ${all.length}`;
       await yieldToUI();
     }
   }
-  if (token !== fileToken) return;
-  status.hidden = true;
 }
 
 function openFileSheet(entry) {
+  if (entry.isDir) { snack('这是目录'); return; }
   openSheet(entry.name.split('/').pop(), [
     {
       label: '取出这个文件',
@@ -611,12 +888,9 @@ function openFileSheet(entry) {
       onPick: () => saveBlob(entry.name.split('/').pop(), dataOf(entry)),
     },
     {
-      label: '复制包内路径',
-      icon: 'M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z',
-      onPick: async () => {
-        try { await navigator.clipboard.writeText(entry.name); snack('已复制路径'); }
-        catch { snack(entry.name); }
-      },
+      label: '替换内容',
+      icon: 'M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25z',
+      onPick: () => pickForImage(entry.name),
     },
   ]);
 }
@@ -628,14 +902,14 @@ const hydration = [];
 let pumping = false;
 
 const io = 'IntersectionObserver' in window
-  ? new IntersectionObserver(list => {
-      for (const item of list) {
-        if (!item.isIntersecting) continue;
-        io.unobserve(item.target);
-        hydration.push(item.target);
-      }
-      pumpHydration();
-    }, { root: null, rootMargin: '320px 0px' })
+  ? new IntersectionObserver(entries => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      io.unobserve(e.target);
+      hydration.push(e.target);
+    }
+    pumpHydration();
+  }, { rootMargin: '220px' })
   : null;
 
 async function pumpHydration() {
@@ -644,7 +918,7 @@ async function pumpHydration() {
   let n = 0;
   while (hydration.length) {
     const tile = hydration.shift();
-    if (tile.isConnected) hydrateTile(tile);
+    if (tile && tile.isConnected && tile.classList.contains('is-skeleton')) hydrateTile(tile);
     if (++n % 4 === 0) await yieldToUI();
   }
   pumping = false;
@@ -670,62 +944,38 @@ function skeletonTile(img, index) {
   const tile = el('div', 'md-tile is-skeleton');
   tile.dataset.name = img.name;
   tile.title = img.name;
-  tile.style.animationDelay = `${Math.min(index, 12) * 8}ms`;
   const frame = el('div', 'md-tile__img');
   frame.appendChild(el('span', 'md-tile__ph'));
-  tile.append(frame,
-    el('div', 'md-tile__name', img.name.split('/').pop()),
-    el('div', 'md-tile__meta', fmtSize(img.bytes)));
-  return tile;
-}
-
-async function hydrateTile(tile) {
-  const name = tile.dataset.name;
-  const meta = S.pkg?.images.find(i => i.name === name);
-  if (!meta) return;
-  const full = makeTile(meta);
-  full.style.opacity = '0';
-  tile.replaceWith(full);
-  await raf();
-  full.style.transition = 'opacity .2s ease';
-  full.style.opacity = '1';
-}
-
-function makeTile(img) {
-  const changed = Boolean(S.images[img.name]);
-  const bytes = imageBytes(img.name);
-  const tile = el('div', `md-tile${changed ? ' is-changed' : ''}`);
-  tile.dataset.name = img.name;
-  tile.title = img.name;
-
-  const frame = el('div', 'md-tile__img');
-  if (bytes) {
-    const old = S.urls.get(img.name);
-    if (old) URL.revokeObjectURL(old);
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
-    S.urls.set(img.name, url);
-    const im = new Image();
-    im.src = url;
-    im.loading = 'lazy';
-    im.decoding = 'async';
-    im.alt = '';
-    frame.appendChild(im);
-  } else {
-    frame.appendChild(el('span', 'md-tile__ph'));
-  }
-
-  const meta = imgMeta(img.name);
-  const dim = meta?.w ? `${meta.w}×${meta.h}` : fmtSize(img.bytes);
   const base = img.name.split('/').pop();
   const dir = S.dupes?.has(base) ? subLabel(img.name) : '';
   tile.append(frame,
     el('div', 'md-tile__name', base),
-    el('div', 'md-tile__meta', dir ? `${dir} · ${dim}` : dim));
-
-  if (changed) tile.appendChild(el('span', 'md-tile__dot'));
-
-  tile.addEventListener('click', () => openImageSheet(img.name));
+    el('div', 'md-tile__meta', dir ? `${dir} · ${fmtSize(img.bytes)}` : fmtSize(img.bytes)));
+  tile.style.animationDelay = `${Math.min(index, 12) * 8}ms`;
   return tile;
+}
+
+function hydrateTile(tile) {
+  const name = tile.dataset.name;
+  const meta = imgMeta(name);
+  tile.classList.remove('is-skeleton');
+  const frame = tile.querySelector('.md-tile__img');
+  frame.textContent = '';
+  const bytes = imageBytes(name);
+  if (bytes) {
+    const im = new Image();
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+    S.urls.set(name, url);
+    im.src = url;
+    im.alt = name;
+    frame.appendChild(im);
+  }
+  const base = name.split('/').pop();
+  const dir = S.dupes?.has(base) ? subLabel(name) : '';
+  const dim = meta?.w ? `${meta.w}×${meta.h}` : '';
+  tile.querySelector('.md-tile__meta').textContent = dir ? `${dir} · ${dim}` : dim;
+  if (S.images[name]) tile.classList.add('is-changed');
+  tile.addEventListener('click', () => openImageSheet(name));
 }
 
 async function renderImages() {
@@ -735,32 +985,32 @@ async function renderImages() {
   const q = ($('search').value || '').trim().toLowerCase();
   grid.textContent = '';
   status.hidden = true;
-  $('imgCount').textContent = S.pkg ? String(S.pkg.images.length) : '0';
 
-  if (io) io.disconnect();
-  hydration.length = 0;
-  for (const u of S.urls.values()) URL.revokeObjectURL(u);
-  S.urls.clear();
-
-  if (!S.pkg || !S.pkg.images.length) {
-    grid.appendChild(el('p', 'md-body-small md-muted', S.pkg ? '包内没有图片资源' : '载入包后显示'));
+  if (!S.pkg) {
+    grid.classList.add('is-empty');
+    grid.appendChild(el('p', 'md-body-small md-muted', '载入包后显示图片'));
+    $('imgCount').textContent = '';
     return;
   }
+  grid.classList.remove('is-empty');
 
-  const list = q ? S.pkg.images.filter(i => i.name.toLowerCase().includes(q)) : S.pkg.images;
+  const all = S.pkg.images;
+  const list = q ? all.filter(i => i.name.toLowerCase().includes(q)) : all;
+  S.dupes = duplicateBases(all);
+  $('imgCount').textContent = String(all.length);
+
   if (!list.length) {
     grid.appendChild(el('p', 'md-body-small md-muted', '没有匹配的图片'));
     return;
   }
-  S.dupes = duplicateBases(list);
 
   const BATCH = 20;
   for (let i = 0; i < list.length; i += BATCH) {
     if (token !== imgToken) return;
     const frag = document.createDocumentFragment();
     const fresh = [];
-    for (let k = i; k < Math.min(i + BATCH, list.length); k++) {
-      const tile = skeletonTile(list[k], k);
+    for (const img of list.slice(i, i + BATCH)) {
+      const tile = skeletonTile(img, i);
       frag.appendChild(tile);
       fresh.push(tile);
     }
@@ -776,102 +1026,52 @@ async function renderImages() {
       await yieldToUI();
     }
   }
-  if (token !== imgToken) return;
-  status.hidden = true;
 }
 
 function updateTile(name) {
-  const meta = S.pkg?.images.find(i => i.name === name);
-  if (!meta) return;
-  const old = $('imageGrid').querySelector(`.md-tile[data-name="${CSS.escape(name)}"]`);
-  if (old) {
-    const url = S.urls.get(name);
-    if (url) { URL.revokeObjectURL(url); S.urls.delete(name); }
-    old.replaceWith(makeTile(meta));
+  const tile = document.querySelector(`.md-tile[data-name="${CSS.escape(name)}"]`);
+  if (!tile) return;
+  tile.classList.add('is-changed');
+  const frame = tile.querySelector('.md-tile__img');
+  if (!frame) return;
+  frame.textContent = '';
+  const bytes = imageBytes(name);
+  if (bytes) {
+    const im = new Image();
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+    S.urls.set(name, url);
+    im.src = url;
+    frame.appendChild(im);
   }
-  if (name === iconName()) renderForm();
+  const meta = imgMeta(name);
+  const base = name.split('/').pop();
+  const dir = S.dupes?.has(base) ? subLabel(name) : '';
+  const dim = meta?.w ? `${meta.w}×${meta.h}` : '';
+  tile.querySelector('.md-tile__meta').textContent = dir ? `${dir} · ${dim}` : dim;
 }
 
 function openImageSheet(name) {
-  const changed = Boolean(S.images[name]);
   const items = [
     {
-      label: '调整尺寸与裁剪',
-      icon: 'M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.7 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
+      label: '调整这张图',
+      icon: 'M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25z',
       onPick: () => openEditor(name),
     },
     {
-      label: '替换图片',
-      icon: 'M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.4-1.4L11 12.2V3zM5 19h14v2H5z',
+      label: '换一张图',
+      icon: 'M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z',
       onPick: () => pickForImage(name),
     },
   ];
-  if (changed) {
+  if (S.images[name]) {
     items.push({
-      label: '还原原图',
-      icon: 'M12 5V2L7 7l5 5V9a5 5 0 1 1-5 5H5a7 7 0 1 0 7-9z',
+      label: '还原成原图',
       danger: true,
-      onPick: () => revertImage(name),
+      icon: 'M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z',
+      onPick: () => { delete S.images[name]; updateTile(name); renderDirty(); snack('已还原'); },
     });
   }
   openSheet(name.split('/').pop(), items);
-}
-
-/* ---------- 状态 ---------- */
-
-function renderDirty() {
-  const m = S.pkg?.manifest;
-  if (!m) {
-    $('detailState').textContent = '载入包后可编辑';
-    $('exportBtn').disabled = true;
-    return;
-  }
-  const n = Object.keys(S.images).length;
-  const diff =
-    $('fName').value !== (m.name || '') ||
-    $('fPackage').value !== (m.package || '') ||
-    $('fVersionName').value !== (m.versionName || '') ||
-    Number($('fVersionCode').value) !== Number(m.versionCode) ||
-    n > 0;
-  $('detailState').textContent = diff
-    ? `已修改${n ? ` · ${n} 张图` : ''}，导出时生效`
-    : '与包内一致';
-  $('exportBtn').disabled = !S.identity || !S.pkg || S.busy;
-}
-
-function renderIdentity() {
-  const name = $('idName');
-  const chip = $('idChip');
-  const info = $('idInfo');
-  info.textContent = '';
-
-  if (!S.identity) {
-    name.textContent = '未设置';
-    chip.className = 'md-chip';
-    chip.textContent = '待生成';
-    info.append(el('dt', null, '说明'), el('dd', null, '生成或导入后，导出时会用这张证书重签。'));
-    $('exportId').disabled = true;
-    $('copyFingerprint').disabled = true;
-    $('exportBtn').disabled = true;
-    return;
-  }
-
-  const id = S.identity;
-  const fp = hexUpper(id.fingerprint).match(/../g).join(' ');
-  name.textContent = id.cn || '未命名';
-  chip.className = 'md-chip md-chip--ok';
-  chip.textContent = '就绪';
-
-  for (const [k, v] of [
-    ['算法', 'RSA-2048 / SHA-256'],
-    ['有效期', `${id.notBefore.toISOString().slice(0, 10)} → ${id.notAfter.toISOString().slice(0, 10)}`],
-    ['指纹', fp],
-    ['来源', id.imported ? '导入的私钥' : '页面生成'],
-  ]) info.append(el('dt', null, k), el('dd', null, v));
-
-  $('exportId').disabled = !id.pkcs8;
-  $('copyFingerprint').disabled = false;
-  $('exportBtn').disabled = !S.pkg || S.busy;
 }
 
 function setTab(tab) {
@@ -881,32 +1081,26 @@ function setTab(tab) {
   $('tabFiles').setAttribute('aria-selected', String(!images));
   $('imageGrid').hidden = !images;
   $('fileList').hidden = images;
-  $('exportImages').classList.toggle('hidden', !images || !S.pkg);
-  $('gridStatus').hidden = true;
-  $('listStatus').hidden = true;
+  $('exportImages').classList.toggle('hidden', !images);
+  $('search').placeholder = images ? '筛选图片名称' : '筛选文件路径';
   S.stale = false;
   if (images) renderImages(); else renderFiles();
 }
 
 /* ---------- 图片编辑器 ---------- */
 
-const Ed = {
-  name: '', img: null, iw: 0, ih: 0,
-  W: 0, H: 0, targetW: 0, targetH: 0,
-  mode: 'fit', zoom: 1, dx: 0, dy: 0,
-  drag: null, file: null, circle: false, lock: true,
-};
+const Ed = {};
 
 const HINTS = {
   fit: '整张图缩放到目标尺寸内，四周补透明。',
-  cover: '等比放大铺满目标尺寸，拖动选位置。',
-  stretch: '直接拉伸到目标尺寸，比例会变形。',
-  raw: '保留原始像素，不缩放不裁剪。',
+  cover: '按比例铺满目标尺寸，超出部分裁掉，可拖动。',
+  stretch: '直接拉伸到目标尺寸，比例会变。',
+  raw: '保持原图像素尺寸，不做任何缩放。',
 };
 
 function openEditor(name) {
   const meta = imgMeta(name);
-  if (!meta) return;
+  if (!meta) { snack('读不到尺寸'); return; }
   const bytes = imageBytes(name);
   if (!bytes) { snack('这张图读不出来'); return; }
 
@@ -914,8 +1108,6 @@ function openEditor(name) {
   Ed.name = name;
   Ed.W = meta.w || 0;
   Ed.H = meta.h || 0;
-  Ed.targetW = Ed.W;
-  Ed.targetH = Ed.H;
   Ed.file = null;
   Ed.circle = false;
   Ed.lock = true;
@@ -934,10 +1126,7 @@ function openEditor(name) {
     Ed.ih = img.naturalHeight;
     if (!Ed.W || !Ed.H) { Ed.W = Ed.iw; Ed.H = Ed.ih; }
     openLayer('editor');
-    requestAnimationFrame(() => {
-      setMode('fit');
-      scaleCanvas();
-    });
+    requestAnimationFrame(() => { setMode('fit'); scaleCanvas(); });
   };
   img.onerror = () => snack('图片解码失败');
   img.src = url;
@@ -947,14 +1136,6 @@ function openEditor(name) {
 function pickForImage(name) {
   S.pending = { name };
   $('imageInput').click();
-}
-
-function revertImage(name) {
-  if (!S.images[name]) return;
-  delete S.images[name];
-  snack(`已还原 ${name.split('/').pop()}`);
-  updateTile(name);
-  renderDirty();
 }
 
 function setMode(mode) {
@@ -1003,17 +1184,13 @@ function applySize() {
 
 function onWidthInput() {
   const w = clamp(Math.round(Number($('edW').value) || 1), 1, 8192);
-  if (Ed.lock && Ed.iw && Ed.ih) {
-    $('edH').value = Math.max(1, Math.round(w * (Ed.ih / Ed.iw)));
-  }
+  if (Ed.lock && Ed.iw && Ed.ih) $('edH').value = Math.max(1, Math.round(w * (Ed.ih / Ed.iw)));
   applySize();
 }
 
 function onHeightInput() {
   const h = clamp(Math.round(Number($('edH').value) || 1), 1, 8192);
-  if (Ed.lock && Ed.iw && Ed.ih) {
-    $('edW').value = Math.max(1, Math.round(h * (Ed.iw / Ed.ih)));
-  }
+  if (Ed.lock && Ed.iw && Ed.ih) $('edW').value = Math.max(1, Math.round(h * (Ed.iw / Ed.ih)));
   applySize();
 }
 
@@ -1076,7 +1253,6 @@ function scaleCanvas() {
   const k = Math.min(aw / cv.width, ah / cv.height, 4);
   cv.style.width = `${Math.max(40, Math.round(cv.width * k))}px`;
   cv.style.height = `${Math.max(40, Math.round(cv.height * k))}px`;
-  cv.style.imageRendering = 'auto';
 }
 
 function updateInfo(outW, outH) {
@@ -1112,13 +1288,11 @@ async function applyEditor() {
     S.images[Ed.name] = bytes;
 
     const meta = S.pkg.images.find(i => i.name === Ed.name);
-    if (meta) {
-      meta.w = cv.width;
-      meta.h = cv.height;
-      S.sizes.set(Ed.name, { w: cv.width, h: cv.height });
-    }
+    if (meta) { meta.w = cv.width; meta.h = cv.height; }
+    S.sizes.set(Ed.name, { w: cv.width, h: cv.height });
 
     closeLayer();
+    if (Ed.name === iconName()) renderIcon();
     updateTile(Ed.name);
     renderDirty();
     snack(`已应用 · ${fmtSize(before)} → ${fmtSize(bytes.length)}`);
@@ -1155,88 +1329,309 @@ async function loadIntoEditor(file) {
   img.src = url;
 }
 
-/* ---------- 流式 zip ---------- */
+/* ---------- 签名身份 ---------- */
 
-async function zipAsync(files, onProgress) {
-  const chunks = [];
-  let failure = null;
-  const zip = new Zip((err, chunk) => {
-    if (err) { failure = err; return; }
-    if (chunk) chunks.push(chunk);
-  });
-  const names = Object.keys(files);
-  for (let i = 0; i < names.length; i++) {
-    const name = names[i];
-    const entry = new ZipDeflate(name, { level: 6 });
-    zip.add(entry);
-    entry.push(files[name], true);
-    if (i % 6 === 5 || i === names.length - 1) {
-      onProgress?.(i + 1, names.length);
-      await yieldToUI();
+function fingerprint() {
+  const id = S.identity;
+  if (!id) return '';
+  return hexUpper(id.fingerprint?.slice(0, 8) || new Uint8Array(8));
+}
+
+function renderIdentity() {
+  const id = S.identity;
+  $('idChip').textContent = id ? '已就绪' : '未设置';
+  $('idChip').className = `md-chip${id ? ' is-ok' : ''}`;
+  $('idName').textContent = id ? id.cn || '未命名' : '未设置身份';
+  const fp = id ? fingerprint() : '';
+  $('idSub').textContent = id
+    ? `${fp ? fp.match(/../g).join(' ') + ' · ' : ''}${new Date(id.notBefore).toLocaleDateString()} 起`
+    : '导出前需要一把私钥';
+
+  for (const b of ['copyFingerprint', 'exportId', 'exportCert', 'exportPub', 'exportZip']) {
+    const node = $(b);
+    if (node) node.disabled = !id;
+  }
+  updateFab();
+}
+
+async function persistIdentity() {
+  try {
+    if (!S.settings.autoIdentity) { await dbDel('kv', 'identity'); return; }
+    const id = S.identity;
+    if (!id) return;
+    await dbPut('kv', {
+      k: 'identity',
+      pkcs8: id.pkcs8,
+      certDer: id.certDer,
+      pubDer: id.pubDer,
+      cn: id.cn,
+      notBefore: id.notBefore,
+      notAfter: id.notAfter,
+      fingerprint: id.fingerprint,
+    });
+  } catch { }
+}
+
+async function restoreIdentity() {
+  if (!S.settings.autoIdentity) return;
+  try {
+    const rec = await dbGet('kv', 'identity');
+    if (!rec) return;
+    const key = await importPrivateKey(rec.pkcs8, 'pkcs8');
+    S.identity = {
+      key,
+      certDer: new Uint8Array(rec.certDer),
+      pubDer: new Uint8Array(rec.pubDer),
+      cn: rec.cn,
+      notBefore: rec.notBefore,
+      notAfter: rec.notAfter,
+      fingerprint: rec.fingerprint ? new Uint8Array(rec.fingerprint) : null,
+      pkcs8: rec.pkcs8,
+    };
+    renderIdentity();
+  } catch { }
+}
+
+function randomCn() {
+  const s = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `RPK-${s}`;
+}
+
+async function generateIdentity() {
+  const mode = S.idMode;
+  const cn = ($('cnInput').value || '').trim() || (mode === 'auto' ? randomCn() : 'RPK Studio');
+  const days = clamp(Number($('daysInput').value) || 3650, 1, 36500);
+  const opts = {
+    cn,
+    days,
+    o: mode === 'manual' ? ($('orgInput').value || '').trim() : '',
+    ou: mode === 'manual' ? ($('ouInput').value || '').trim() : '',
+    c: mode === 'manual' ? ($('countryInput').value || '').trim().toUpperCase() : '',
+  };
+
+  const btn = $('genId');
+  btn.disabled = true;
+  btn.classList.add('is-loading');
+  try {
+    const id = await createIdentity(opts);
+    const fp = new Uint8Array(await crypto.subtle.digest('SHA-256', id.certDer));
+    S.identity = { ...id, fingerprint: fp };
+    $('cnInput').value = cn;
+    await persistIdentity();
+    renderIdentity();
+    snack('身份已生成');
+  } catch (e) {
+    snack(`生成失败：${e.message || e}`);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+  }
+}
+
+/* ---------- 导入 / 导出身份 ---------- */
+
+const PEM_KINDS = [
+  ['BEGIN RSA PRIVATE KEY', 'pkcs1'],
+  ['BEGIN PRIVATE KEY', 'pkcs8'],
+  ['BEGIN CERTIFICATE', 'cert'],
+  ['BEGIN PUBLIC KEY', 'pub'],
+];
+
+function sniffPem(text) {
+  for (const [tag, kind] of PEM_KINDS) if (text.includes(tag)) return kind;
+  return null;
+}
+
+/** 把 DER 里的 RSA 公钥与私钥做一次签名自检，确认配对。 */
+async function keysMatch(key, certDer) {
+  try {
+    const cert = parseCertificate(certDer);
+    const spki = cert.spki;
+    const pub = await crypto.subtle.importKey('spki', spki, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const probe = te.encode('rpk-studio');
+    const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, probe);
+    return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', pub, sig, probe);
+  } catch {
+    return false;
+  }
+}
+
+async function importIdentityFiles(files) {
+  let key = null;
+  let certDer = null;
+  let cn = '';
+  let pubDer = null;
+
+  for (const file of files) {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const name = file.name.toLowerCase();
+
+    if (name.endsWith('.p12') || name.endsWith('.pfx')) {
+      snack('暂不支持 .p12，请用 openssl 转成 pem 再导入');
+      continue;
+    }
+
+    const text = (name.endsWith('.pem') || name.endsWith('.key') || name.endsWith('.crt') || name.endsWith('.cer') || name.endsWith('.pub') || name.endsWith('.txt'))
+      ? new TextDecoder().decode(buf) : '';
+    const kind = text ? sniffPem(text) : null;
+
+    try {
+      if (kind === 'pkcs1') {
+        key = await importPrivateKey(text, 'pkcs1');
+      } else if (kind === 'pkcs8') {
+        key = await importPrivateKey(text, 'pkcs8');
+      } else if (kind === 'cert') {
+        certDer = base64ToBytes(text);
+      } else if (kind === 'pub') {
+        pubDer = base64ToBytes(text);
+      } else if (!kind) {
+        // 无 PEM 头，按 DER 猜：证书 → PKCS#8
+        try {
+          const cert = parseCertificate(buf);
+          if (cert && cert.spki) { certDer = buf; cn = cert.cn || ''; }
+          else key = await importPrivateKey(buf, 'pkcs8');
+        } catch {
+          key = await importPrivateKey(buf, 'pkcs8');
+        }
+      }
+    } catch (e) {
+      snack(`无法识别 ${file.name}`);
     }
   }
-  zip.end();
-  if (failure) throw failure;
-  const total = chunks.reduce((s, c) => s + c.length, 0);
-  const out = new Uint8Array(total);
-  let p = 0;
-  for (const c of chunks) { out.set(c, p); p += c.length; }
+
+  if (!key) { snack('没有找到私钥'); return; }
+
+  if (!certDer) {
+    const id = await createIdentity({ cn: cn || ($('cnInput').value || '').trim() || randomCn(), key });
+    S.identity = id;
+  } else {
+    const ok = await keysMatch(key.key, certDer);
+    if (!ok) { snack('私钥与证书不匹配'); return; }
+    const cert = parseCertificate(certDer);
+    S.identity = {
+      key: key.key,
+      certDer,
+      pubDer: cert.spki,
+      cn: cert.cn,
+      notBefore: cert.notBefore,
+      notAfter: cert.notAfter,
+    };
+  }
+
+  const fp = new Uint8Array(await crypto.subtle.digest('SHA-256', S.identity.certDer));
+  S.identity.fingerprint = fp;
+  if (S.identity.key && S.identity.key.extractable) {
+    try { S.identity.pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', S.identity.key)); } catch { }
+  }
+  await persistIdentity();
+  renderIdentity();
+  snack('身份已导入');
+}
+
+function base64ToBytes(pem) {
+  const b64 = pem.split('\n').filter(l => l && !l.startsWith('-----')).join('').trim();
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
-/* ---------- 身份导出 ---------- */
-
 function derToPem(der, label) {
-  let bin = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < der.length; i += chunk) {
-    bin += String.fromCharCode.apply(null, der.subarray(i, i + chunk));
-  }
-  const b64 = btoa(bin);
-  const lines = b64.match(/.{1,64}/g).join('\n');
-  return `-----BEGIN ${label}-----\n${lines}\n-----END ${label}-----\n`;
+  const b64 = btoa(String.fromCharCode.apply(null, der));
+  const lines = b64.match(/.{1,64}/g) || [];
+  return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----\n`;
 }
 
-async function exportIdentity() {
+async function exportIdentityPart(part) {
   const id = S.identity;
-  if (!id?.pkcs8) { snack('当前身份没有可导出的私钥'); return; }
-  const btn = $('exportId');
-  btn.disabled = true;
-  try {
-    const priv = derToPem(id.pkcs8, 'PRIVATE KEY');
-    const cert = derToPem(id.certDer, 'CERTIFICATE');
-    const readme = [
-      'RPK Studio 导出的签名身份',
-      '',
-      `CN: ${id.cn}`,
-      `有效期至: ${id.notAfter.toISOString()}`,
-      `SHA-256 指纹: ${hexUpper(id.fingerprint).match(/../g).join(':')}`,
-      '',
-      'private.pem      PKCS#8 私钥，务必保密',
-      'certificate.pem  X.509 自签证书',
-      '',
-      '转成 keystore：',
-      'openssl pkcs12 -export -inkey private.pem -in certificate.pem -out key.p12',
-    ].join('\n');
-
-    const zipped = await zipAsync({
-      'private.pem': te.encode(priv),
-      'certificate.pem': te.encode(cert),
-      'README.txt': te.encode(readme),
-    });
-    const safe = (id.cn || 'identity').replace(/[^\w\u4e00-\u9fa5-]+/g, '_');
-    await saveBlob(`${safe}-identity.zip`, zipped);
-    snack('身份已导出：private.pem + certificate.pem');
-  } catch (e) {
-    snack(`导出失败：${e.message || e}`);
-  } finally {
-    btn.disabled = false;
+  if (!id) return;
+  if (part === 'key') {
+    const der = id.pkcs8 || new Uint8Array(await crypto.subtle.exportKey('pkcs8', id.key));
+    await saveBlob('private.pem', te.encode(derToPem(der, 'PRIVATE KEY')));
+  } else if (part === 'cert') {
+    await saveBlob('certificate.pem', te.encode(derToPem(id.certDer, 'CERTIFICATE')));
+  } else if (part === 'pub') {
+    await saveBlob('public.pem', te.encode(derToPem(id.pubDer, 'PUBLIC KEY')));
+  } else {
+    const files = [
+      { name: 'private.pem', data: te.encode(derToPem(id.pkcs8 || new Uint8Array(await crypto.subtle.exportKey('pkcs8', id.key)), 'PRIVATE KEY')) },
+      { name: 'certificate.pem', data: te.encode(derToPem(id.certDer, 'CERTIFICATE')) },
+      { name: 'public.pem', data: te.encode(derToPem(id.pubDer, 'PUBLIC KEY')) },
+      { name: 'readme.txt', data: te.encode(`CN: ${id.cn}\n有效: ${new Date(id.notBefore).toISOString()} → ${new Date(id.notAfter).toISOString()}\n\nopenssl pkcs12 -export -inkey private.pem -in certificate.pem -out key.p12\n`) },
+    ];
+    const zip = makeZip(files);
+    await saveBlob('identity.zip', zip);
   }
 }
 
-/* ---------- 读写 ---------- */
+/** 极简 STORE-only ZIP，用于身份包。 */
+function makeZip(files) {
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  const now = new Date();
+  const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
 
-async function loadFile(file) {
+  for (const f of files) {
+    const name = te.encode(f.name);
+    const crc = crc32(f.data);
+    const lh = new Uint8Array(30 + name.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint16(10, time, true);
+    lv.setUint16(12, date, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, f.data.length, true);
+    lv.setUint32(22, f.data.length, true);
+    lv.setUint16(26, name.length, true);
+    lh.set(name, 30);
+    chunks.push(lh, f.data);
+
+    const ch = new Uint8Array(46 + name.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, time, true);
+    cv.setUint16(14, date, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, f.data.length, true);
+    cv.setUint32(24, f.data.length, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint32(42, offset, true);
+    ch.set(name, 46);
+    central.push(ch);
+    offset += lh.length + f.data.length;
+  }
+
+  let cdSize = 0;
+  for (const c of central) cdSize += c.length;
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+
+  const total = offset + cdSize + 22;
+  const out = new Uint8Array(total);
+  let p = 0;
+  for (const c of chunks) { out.set(c, p); p += c.length; }
+  for (const c of central) { out.set(c, p); p += c.length; }
+  out.set(eocd, p);
+  return out;
+}
+
+/* ---------- 载入与导出 ---------- */
+
+async function loadFile(file, opts = {}) {
   if (S.busy) return;
   S.busy = true;
   showScrim('正在读取文件', file.name);
@@ -1256,6 +1651,7 @@ async function loadFile(file) {
     S.sizes = new Map();
     for (const u of S.urls.values()) URL.revokeObjectURL(u);
     S.urls.clear();
+    S.stale = true;
 
     $('drop').classList.add('hidden');
     $('overviewBody').classList.remove('hidden');
@@ -1267,19 +1663,23 @@ async function loadFile(file) {
     renderKV();
     renderVerify();
     renderNotice();
-    S.stale = true;
     renderDirty();
+    setChip(pkg.verify && pkg.verify.rsaOk && pkg.verify.digestOk && pkg.verify.badFiles === 0 ? 'ok' : 'warn',
+      pkg.verify ? '签名已校验' : '未签名');
 
     const v = pkg.verify;
     const ok = v && v.digestOk && v.rsaOk && v.badFiles === 0;
-    addHistory({
-      kind: 'load',
-      file: file.name,
-      pkg: pkg.manifest?.package || '',
-      name: pkg.manifest?.name || '',
-      version: pkg.manifest?.versionName || '',
-      size: file.size,
-    });
+    if (!opts.fromHistory) {
+      await addHistory({
+        kind: 'load',
+        file: file.name,
+        pkg: pkg.manifest?.package || '',
+        name: pkg.manifest?.name || '',
+        version: pkg.manifest?.versionName || '',
+        size: file.size,
+        verified: Boolean(ok),
+      }, S.settings.storeFiles ? buf : null);
+    }
     snack(`解析完成 ${Math.round(performance.now() - t0)} ms · ${v ? (ok ? '签名有效' : '签名异常') : '未签名'}`);
   } catch (e) {
     setChip('bad', '无法解析');
@@ -1291,36 +1691,21 @@ async function loadFile(file) {
   }
 }
 
-function collectPatch() {
-  const m = { ...S.pkg.manifest };
-  m.name = $('fName').value.trim();
-  m.package = $('fPackage').value.trim();
-  m.versionName = $('fVersionName').value.trim();
-  m.versionCode = Number($('fVersionCode').value);
-
-  const watch = S.pkg.watch
-    ? { ...S.pkg.watch, name: m.name, package: m.package, versionName: m.versionName, versionCode: m.versionCode }
-    : null;
-  const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
-
-  return {
-    manifestText: changed(S.pkg.manifest, m) ? JSON.stringify(m, null, 2) + '\n' : null,
-    watchText: (S.optWatch && watch && changed(S.pkg.watch, watch)) ? JSON.stringify(watch, null, 2) + '\n' : null,
-    images: S.images,
-    manifest: m,
-  };
-}
-
-function validate(m) {
-  if (!m.name) return '应用名称不能为空';
-  if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(m.package)) return '包名格式不对，应类似 com.example.app';
-  if (!m.versionName) return '版本名不能为空';
-  if (!Number.isInteger(m.versionCode) || m.versionCode <= 0) return '版本号需为正整数';
-  return null;
+function updateFab() {
+  const ready = Boolean(S.pkg && S.identity && !S.busy);
+  const btn = $('exportBtn');
+  if (btn) btn.disabled = !ready;
+  const state = $('toolState');
+  if (state) state.textContent = S.pkg ? '可用' : '载入包后可用';
 }
 
 async function doExport() {
-  if (!S.pkg || !S.identity || S.busy) return;
+  if (!S.pkg || S.busy) return;
+  if (!S.identity) {
+    expandSignature(true);
+    snack('先设置签名身份');
+    return;
+  }
   const patch = collectPatch();
   const err = validate(patch.manifest);
   if (err) { snack(err); return; }
@@ -1336,21 +1721,37 @@ async function doExport() {
     const out = await repack(S.pkg, patch, S.identity, p => {
       if (p.stage === 'digest') setScrimProgress(p.done, p.total, '计算文件摘要');
     });
-    await saveBlob(`${patch.manifest.package}.release.${patch.manifest.versionName}.rpk`, out);
+    const outName = `${patch.manifest.package}.release.${patch.manifest.versionName}.rpk`;
+    await saveBlob(outName, out);
+
+    S.lastExport = { name: outName, bytes: out };
+    $('recentCard').classList.remove('hidden');
+    $('recentName').textContent = outName;
 
     const delta = out.length - before;
     const sign = `${delta >= 0 ? '+' : '-'}${fmtSize(Math.abs(delta))}`;
     hideScrim();
 
-    if (S.optVerify) {
+    let ok = null;
+    if (S.settings.optVerify) {
       showScrim('正在自检导出的包', '重新解析刚生成的文件');
       const check = await inspect(out);
-      const ok = check.verify.digestOk && check.verify.rsaOk && check.verify.badFiles === 0;
+      ok = Boolean(check.verify.digestOk && check.verify.rsaOk && check.verify.badFiles === 0);
       hideScrim();
       snack(`已导出 ${fmtSize(out.length)}（${sign}）· ${ok ? '签名自检通过' : '签名自检失败'}`);
     } else {
       snack(`已导出 ${fmtSize(out.length)}（${sign}）`);
     }
+
+    await addHistory({
+      kind: 'export',
+      file: outName,
+      pkg: patch.manifest.package,
+      name: patch.manifest.name,
+      version: patch.manifest.versionName,
+      size: out.length,
+      verified: ok,
+    }, S.settings.storeFiles ? out : null);
   } catch (e) {
     snack(`导出失败：${e.message || e}`);
   } finally {
@@ -1361,290 +1762,152 @@ async function doExport() {
   }
 }
 
-/* ---------- 事件 ---------- */
+/* ---------- 工具箱：应用伪装 ---------- */
 
-buildNav();
-
-$('drop').addEventListener('click', () => $('fileInput').click());
-$('drop').addEventListener('keydown', e => {
-  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('fileInput').click(); }
-});
-document.addEventListener('dragover', e => {
-  e.preventDefault();
-  $('drop').classList.add('over');
-});
-document.addEventListener('dragleave', e => {
-  if (!e.relatedTarget) $('drop').classList.remove('over');
-});
-document.addEventListener('drop', e => {
-  e.preventDefault();
-  $('drop').classList.remove('over');
-  const f = e.dataTransfer?.files?.[0];
-  if (f) loadFile(f);
-});
-$('fileInput').addEventListener('change', e => {
-  const f = e.target.files?.[0];
-  e.target.value = '';
-  if (f) loadFile(f);
-});
-$('changeFile').addEventListener('click', () => $('fileInput').click());
-
-for (const id of ['fName', 'fPackage', 'fVersionName', 'fVersionCode']) {
-  $(id).addEventListener('input', renderDirty);
+async function loadCatalog() {
+  if (S.tbCatalog) return S.tbCatalog;
+  const res = await fetch('assets/icons/catalog.json', { cache: 'force-cache' });
+  S.tbCatalog = await res.json();
+  return S.tbCatalog;
 }
 
-$('tabImages').addEventListener('click', () => setTab('images'));
-$('tabFiles').addEventListener('click', () => setTab('files'));
-
-let searchTimer = null;
-$('search').addEventListener('input', () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    if (S.tab === 'images') renderImages(); else renderFiles();
-  }, 180);
-});
-
-$('optVerify').addEventListener('change', e => { S.optVerify = e.target.checked; });
-$('optWatch').addEventListener('change', e => { S.optWatch = e.target.checked; });
-
-$('pickIcon').addEventListener('click', () => pickForImage(iconName()));
-
-$('imageInput').addEventListener('change', async e => {
-  const f = e.target.files?.[0];
-  e.target.value = '';
-  const pending = S.pending;
-  S.pending = null;
-  if (!f || !pending) return;
-  const meta = S.pkg.images.find(i => i.name === pending.name);
-  if (!meta) return;
-  Ed.name = pending.name;
-  Ed.W = meta.w || 0;
-  Ed.H = meta.h || 0;
-  Ed.targetW = Ed.W;
-  Ed.targetH = Ed.H;
-  await loadIntoEditor(f);
-});
-
-$('exportImages').addEventListener('click', async () => {
-  if (!S.pkg) return;
-  const btn = $('exportImages');
-  if (btn.classList.contains('is-loading')) return;
-  btn.classList.add('is-loading');
-  btn.disabled = true;
-  const list = S.pkg.images;
-  showScrim('正在打包图片', `0 / ${list.length}`);
-  try {
-    const files = {};
-    for (let i = 0; i < list.length; i++) {
-      files[list[i].name] = imageBytes(list[i].name);
-      if (i % 12 === 11) {
-        setScrimProgress(i + 1, list.length, '读取图片');
-        await yieldToUI();
-      }
-    }
-    const zipped = await zipAsync(files, (done, total) => setScrimProgress(done, total, '压缩'));
-    await saveBlob(`${S.pkg.manifest?.package || 'rpk'}-images.zip`, zipped);
-    hideScrim();
-    snack(`导出 ${list.length} 张图片 · ${fmtSize(zipped.length)}`);
-  } catch (e) {
-    hideScrim();
-    snack(`导出失败：${e.message || e}`);
-  } finally {
-    btn.classList.remove('is-loading');
-    btn.disabled = false;
+async function renderToolbox() {
+  const cat = await loadCatalog();
+  const set = cat[S.tbOs];
+  const grid = $('tbGrid');
+  grid.textContent = '';
+  for (const item of set) {
+    const tile = el('div', 'md-tile');
+    tile.dataset.name = item.id;
+    const frame = el('div', 'md-tile__img');
+    const im = new Image();
+    im.src = `assets/icons/${S.tbOs}/${item.id}.png`;
+    im.alt = item.name;
+    im.loading = 'lazy';
+    frame.appendChild(im);
+    tile.append(frame,
+      el('div', 'md-tile__name', item.name),
+      el('div', 'md-tile__meta', item.id));
+    tile.addEventListener('click', () => applyDisguise(item, S.tbOs));
+    grid.appendChild(tile);
   }
-});
-
-$('genId').addEventListener('click', async () => {
-  const cn = $('cnInput').value.trim() || 'Vela App';
-  const btn = $('genId');
-  btn.disabled = true;
-  btn.classList.add('is-loading');
-  await raf();
-  try {
-    const id = await createIdentity(cn, 3650);
-    S.identity = { ...id, fingerprint: new Uint8Array(await sha256(id.certDer)) };
-    renderIdentity();
-    renderDirty();
-    snack(`已生成自签证书：${cn}`);
-  } catch (e) {
-    snack(`生成失败：${e.message || e}`);
-  } finally {
-    btn.classList.remove('is-loading');
-    btn.disabled = false;
-  }
-});
-
-$('loadKey').addEventListener('click', () => $('keyInput').click());
-$('keyInput').addEventListener('change', async e => {
-  const f = e.target.files?.[0];
-  e.target.value = '';
-  if (!f) return;
-  try {
-    const { key, pubDer } = await importPrivateKey(await f.text());
-    const cn = $('cnInput').value.trim() || 'Imported Key';
-    const cert = await createIdentity(cn, 3650, { key, pubDer });
-    S.identity = { ...cert, cn, fingerprint: new Uint8Array(await sha256(cert.certDer)), imported: true };
-    renderIdentity();
-    renderDirty();
-    snack(`已载入私钥：${cn}`);
-  } catch (err) {
-    snack(`私钥载入失败：${err.message || err}`);
-  }
-});
-
-$('exportId').addEventListener('click', exportIdentity);
-$('copyFingerprint').addEventListener('click', async () => {
-  if (!S.identity) return;
-  const fp = hexUpper(S.identity.fingerprint).match(/../g).join(':');
-  try {
-    await navigator.clipboard.writeText(fp);
-    snack('指纹已复制');
-  } catch {
-    snack(fp);
-  }
-});
-
-$('exportBtn').addEventListener('click', doExport);
-
-$('recentShare').addEventListener('click', async () => {
-  if (!S.lastExport) { snack('还没有可分享的导出'); return; }
-  await shareBlob(S.lastExport.name, S.lastExport.bytes);
-});
-
-/* 编辑器 */
-
-$('edModes').addEventListener('click', e => {
-  const b = e.target.closest('button[data-mode]');
-  if (b) setMode(b.dataset.mode);
-});
-
-$('edZoom').addEventListener('input', e => {
-  Ed.zoom = Number(e.target.value) / 100;
-  $('edZoomVal').textContent = `${Math.round(Ed.zoom * 100)}%`;
-  draw();
-});
-
-$('edW').addEventListener('input', onWidthInput);
-$('edH').addEventListener('input', onHeightInput);
-$('edW').addEventListener('blur', () => { if (Ed.mode !== 'raw') $('edW').value = Ed.W; });
-$('edH').addEventListener('blur', () => { if (Ed.mode !== 'raw') $('edH').value = Ed.H; });
-
-$('edLock').addEventListener('click', () => {
-  Ed.lock = !Ed.lock;
-  $('edLock').setAttribute('aria-pressed', String(Ed.lock));
-  if (Ed.lock && Ed.iw && Ed.ih) {
-    const { w } = readSize();
-    $('edH').value = Math.max(1, Math.round(w * (Ed.ih / Ed.iw)));
-    applySize();
-  }
-});
-
-$('edCircle').addEventListener('change', e => {
-  Ed.circle = e.target.checked;
-  draw();
-});
-
-$('edApply').addEventListener('click', applyEditor);
-$('edPick').addEventListener('click', () => { S.pending = { name: Ed.name }; $('imageInput').click(); });
-
-(function bindStage() {
-  const stage = $('edStage');
-  const cv = $('edCanvas');
-
-  stage.addEventListener('pointerdown', e => {
-    if (Ed.mode !== 'cover' || !Ed.img) return;
-    stage.setPointerCapture(e.pointerId);
-    stage.classList.add('is-dragging');
-    Ed.drag = { x: e.clientX, y: e.clientY, dx: Ed.dx, dy: Ed.dy };
-  });
-
-  stage.addEventListener('pointermove', e => {
-    if (!Ed.drag) return;
-    const rect = cv.getBoundingClientRect();
-    const k = cv.width / Math.max(1, rect.width);
-    Ed.dx = Ed.drag.dx + (e.clientX - Ed.drag.x) * k;
-    Ed.dy = Ed.drag.dy + (e.clientY - Ed.drag.y) * k;
-    draw();
-  });
-
-  const end = e => {
-    if (!Ed.drag) return;
-    Ed.drag = null;
-    stage.classList.remove('is-dragging');
-    if (e && stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId);
-  };
-  stage.addEventListener('pointerup', end);
-  stage.addEventListener('pointercancel', end);
-})();
-
-for (const b of document.querySelectorAll('[data-back]')) {
-  b.addEventListener('click', closeLayer);
 }
 
-window.addEventListener('resize', () => {
-  setTrack(-S.page * pageWidth(), false);
-  if (S.layer === 'editor') scaleCanvas();
-});
+async function applyDisguise(item, os) {
+  if (!S.pkg) { snack('先载入一个包'); return; }
+  try {
+    const bytes = new Uint8Array(await (await fetch(`assets/icons/${os}/${item.id}.png`)).arrayBuffer());
+    const name = iconName();
+    const meta = imgMeta(name) || { w: 100, h: 100 };
+    const out = await resizePng(bytes, meta.w || 100, meta.h || 100);
 
-/* 主题 */
+    S.images[name] = out;
+    S.sizes.set(name, { w: meta.w || 100, h: meta.h || 100 });
+    $('fName').value = item.name;
 
-const THEME_KEY = 'rpk-theme';
+    closeLayer();
+    goTo(1, true);
+    renderIcon();
+    updateTile(name);
+    renderDirty();
+    snack(`已套用「${item.name}」`);
+  } catch (e) {
+    snack(`套用失败：${e.message || e}`);
+  }
+}
+
+function resizePng(bytes, w, h) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+    const img = new Image();
+    img.onload = async () => {
+      const cv = document.createElement('canvas');
+      cv.width = w;
+      cv.height = h;
+      const ctx = cv.getContext('2d');
+      const s = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+      const dw = img.naturalWidth * s;
+      const dh = img.naturalHeight * s;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+      URL.revokeObjectURL(url);
+      if (!blob) { reject(new Error('转换失败')); return; }
+      resolve(new Uint8Array(await blob.arrayBuffer()));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('解码失败')); };
+    img.src = url;
+  });
+}
+
+/* ---------- 设置 ---------- */
 
 function applyTheme(choice) {
   const root = document.documentElement;
   if (choice === 'auto') root.removeAttribute('data-theme');
   else root.dataset.theme = choice;
-  try { localStorage.setItem(THEME_KEY, choice); } catch {}
-  const seg = $('themeSeg');
-  if (seg) {
-    for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice));
-  }
-  const hint = $('themeHint');
-  if (hint) {
-    hint.textContent = choice === 'auto'
-      ? '跟随系统设置自动切换。'
-      : choice === 'light' ? '固定浅色，忽略系统设置。' : '固定深色，忽略系统设置。';
+  try { localStorage.setItem('rpk-theme', choice); } catch { }
+  for (const b of $('themeSeg').children) {
+    b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice));
   }
 }
 
-$('themeSeg').addEventListener('click', e => {
-  const b = e.target.closest('[data-theme-choice]');
-  if (b) applyTheme(b.dataset.themeChoice);
-});
+function renderSettingsPage() {
+  $('updAuto').checked = S.settings.updAuto;
+  $('updMirror').value = S.settings.updMirror;
+  $('stRecord').checked = S.settings.record;
+  $('stFiles').checked = S.settings.storeFiles;
+  $('stIdentity').checked = S.settings.autoIdentity;
+  $('optVerify').checked = S.settings.optVerify;
+  $('optWatch').checked = S.settings.optWatch;
+  updateStorageHint();
+}
 
-/* 版本契约 */
-(function checkContract() {
-  if (document.querySelectorAll('.md-page').length !== PAGES.length) {
-    const bar = $('fatal');
-    if (bar) {
-      bar.hidden = false;
-      bar.textContent = '页面与脚本版本不一致，部分功能不可用。请强制刷新（Ctrl/Cmd + Shift + R）。';
+/* ---------- 更新检查 ---------- */
+
+const UPDATE_URL = 'https://raw.githubusercontent.com/hrk666666/rpk-studio/main/version.json';
+
+async function checkUpdate(manual = false) {
+  const mirror = (S.settings.updMirror || '').trim();
+  const url = mirror ? mirror.replace(/\/+$/, '') + '/' + UPDATE_URL : UPDATE_URL;
+  if (manual) $('updState').textContent = '正在检查…';
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const info = await res.json();
+    if (Number(info.versionCode) > VERSION.code) {
+      $('updState').textContent = `发现 ${info.versionName}`;
+      openSheet(`新版本 ${info.versionName}`, [
+        {
+          label: '前往下载',
+          icon: 'M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.4-1.4L11 12.2V3zM5 19h14v2H5z',
+          onPick: () => window.open(info.url || 'https://github.com/hrk666666/rpk-studio/releases', '_blank', 'noopener'),
+        },
+        { label: '稍后', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 5v5.6l4 2.4-.9 1.5L11 13V7h2z', onPick: () => { } },
+      ]);
+      if (!manual) return;
+    } else {
+      $('updState').textContent = '已是最新';
+      if (manual) snack('已是最新版本');
     }
+  } catch (e) {
+    if (manual) $('updState').textContent = `检查失败：${e.message || e}`;
   }
-})();
-
-/* 初始化 */
-
-try { applyTheme(localStorage.getItem(THEME_KEY) || 'auto'); } catch { applyTheme('auto'); }
-renderKV();
-renderForm();
-renderIdentity();
-renderDirty();
-renderImages();
-$('topTitle').textContent = PAGES[0].label;
-setTrack(0, false);
+}
 
 /* ---------- 条款 ---------- */
 
-const CONSENT_KEY = 'rpk-consent-v1';
+const CONSENT_KEY = 'rpk-consent-v2';
+let gateMode = 'first';
+let gateBound = false;
+let gateRefresh = () => { };
 
 function readConsent() {
   try { return JSON.parse(localStorage.getItem(CONSENT_KEY) || 'null'); } catch { return null; }
 }
-
-let gateMode = 'first';
-let gateBound = false;
 
 function bindGate() {
   if (gateBound) return;
@@ -1654,15 +1917,12 @@ function bindGate() {
   const box = $('gateConsent').querySelector('input');
   const accept = $('gateAccept');
 
-  const refresh = () => {
+  gateRefresh = () => {
     const max = scroll.scrollHeight - scroll.clientHeight;
     const ratio = max <= 0 ? 1 : Math.min(1, scroll.scrollTop / max);
     $('gateBar').style.width = `${(ratio * 100).toFixed(1)}%`;
 
-    if (gateMode === 'view') {
-      accept.disabled = false;
-      return;
-    }
+    if (gateMode === 'view') { accept.disabled = false; return; }
 
     const atEnd = ratio >= 0.999;
     if (atEnd && box.disabled) {
@@ -1672,31 +1932,22 @@ function bindGate() {
     accept.disabled = !(atEnd && box.checked);
   };
 
-  scroll.addEventListener('scroll', refresh, { passive: true });
-
+  scroll.addEventListener('scroll', gateRefresh, { passive: true });
   box.addEventListener('change', () => {
     $('gateConsent').classList.toggle('is-signed', box.checked);
-    refresh();
+    gateRefresh();
   });
 
   accept.addEventListener('click', () => {
     if (gateMode === 'first') {
       try {
-        localStorage.setItem(CONSENT_KEY, JSON.stringify({
-          accepted: true,
-          at: new Date().toISOString(),
-          version: 1,
-        }));
-      } catch {}
+        localStorage.setItem(CONSENT_KEY, JSON.stringify({ accepted: true, at: new Date().toISOString(), version: 2 }));
+      } catch { }
       renderTermsHint();
     }
     closeGate();
   });
-
-  gateRefresh = refresh;
 }
-
-let gateRefresh = () => {};
 
 function closeGate() {
   const gate = $('consentGate');
@@ -1745,9 +1996,7 @@ function openGate(mode) {
 
 function renderTermsHint() {
   const saved = readConsent();
-  const hint = $('termsHint');
-  if (!hint) return;
-  hint.textContent = saved?.accepted
+  $('termsHint').textContent = saved?.accepted
     ? `已于 ${new Date(saved.at).toLocaleString('zh-CN', { hour12: false })} 同意`
     : '查看条款与隐私说明';
 }
@@ -1758,122 +2007,253 @@ function initConsent() {
   openGate('first');
 }
 
-/* ---------- 历史记录 ---------- */
+/* ---------- 签名区块展开 ---------- */
 
-const HISTORY_KEY = 'rpk-history';
-const HISTORY_MAX = 60;
-
-function readHistory() {
-  try {
-    const v = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    return Array.isArray(v) ? v : [];
-  } catch { return []; }
+function expandSignature(open) {
+  const body = $('sigBody');
+  const toggle = $('sigToggle');
+  body.hidden = !open;
+  toggle.setAttribute('aria-expanded', String(open));
+  $('sigBlock').classList.toggle('is-open', open);
+  if (open) $('sigBlock').scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
-function writeHistory(list) {
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX))); } catch {}
+/* ---------- 初始化 ---------- */
+
+loadSettings();
+buildNav();
+
+const savedTheme = (() => { try { return localStorage.getItem('rpk-theme') || S.settings.theme; } catch { return S.settings.theme; } })();
+applyTheme(savedTheme);
+renderKV();
+renderVerify();
+renderImages();
+renderForm();
+renderIdentity();
+renderSettingsPage();
+renderHistory();
+initConsent();
+restoreIdentity().then(() => updateStorageHint());
+$('topTitle').textContent = PAGES[0].label;
+setTrack(0, false);
+
+/* ---------- 事件绑定 ---------- */
+
+$('drop').addEventListener('click', () => $('fileInput').click());
+$('drop').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('fileInput').click(); }
+});
+
+document.addEventListener('dragover', e => {
+  e.preventDefault();
+  $('drop').classList.add('over');
+});
+document.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) $('drop').classList.remove('over');
+});
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  $('drop').classList.remove('over');
+  const f = e.dataTransfer?.files?.[0];
+  if (f) loadFile(f);
+});
+
+$('fileInput').addEventListener('change', e => {
+  const f = e.target.files?.[0];
+  if (f) loadFile(f);
+  e.target.value = '';
+});
+
+$('changeFile').addEventListener('click', () => $('fileInput').click());
+
+for (const id of ['fName', 'fPackage', 'fVersionName', 'fVersionCode']) {
+  $(id).addEventListener('input', renderDirty);
 }
 
-function addHistory(entry) {
-  const list = readHistory();
-  list.unshift({
-    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-    at: new Date().toISOString(),
-    ...entry,
-  });
-  writeHistory(list);
-  renderHistory();
-}
+$('pickIcon').addEventListener('click', () => {
+  S.pending = { name: iconName() };
+  $('imageInput').click();
+});
 
-function updateHistoryHint() {
-  const clear = $('clearHistory');
-  if (clear) clear.disabled = readHistory().length === 0;
-}
-
-function timeLabel(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (d.toDateString() === now.toDateString()) return hm;
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
-}
-
-function renderHistory() {
-  const list = readHistory();
-  const ul = $('historyList');
-  ul.textContent = '';
-  $('historyEmpty').hidden = list.length > 0;
-  $('clearHistory').disabled = list.length === 0;
-
-  for (const item of list) {
-    const li = document.createElement('li');
-    const btn = el('button', 'md-history__item');
-    btn.type = 'button';
-
-    const kind = el('span', `md-history__kind md-history__kind--${item.kind === 'export' ? 'export' : 'load'}`,
-      item.kind === 'export' ? '导出' : '载入');
-
-    const body = el('span', 'md-history__body');
-    body.append(
-      el('span', 'md-body-medium', item.pkg || item.file || '—'),
-      el('span', 'md-history__meta',
-        [item.name, item.version, item.size ? fmtSize(item.size) : ''].filter(Boolean).join(' · ')),
-    );
-
-    btn.append(kind, body, el('span', 'md-history__time', timeLabel(item.at)));
-    btn.addEventListener('click', () => openHistorySheet(item));
-    li.appendChild(btn);
-    ul.appendChild(li);
+$('imageInput').addEventListener('change', e => {
+  const f = e.target.files?.[0];
+  e.target.value = '';
+  if (!f) return;
+  const target = S.pending?.name;
+  if (!target) return;
+  if (!Ed.name || Ed.name !== target) {
+    const meta = imgMeta(target) || { w: 0, h: 0 };
+    Ed.name = target;
+    Ed.W = meta.w;
+    Ed.H = meta.h;
+    Ed.circle = false;
+    Ed.lock = true;
+    Ed.zoom = 1;
+    Ed.dx = 0;
+    Ed.dy = 0;
+    $('edSub').textContent = target;
   }
+  loadIntoEditor(f);
+});
+
+$('tabImages').addEventListener('click', () => setTab('images'));
+$('tabFiles').addEventListener('click', () => setTab('files'));
+$('search').addEventListener('input', () => { if (S.tab === 'files') renderFiles(); else renderImages(); });
+
+$('exportImages').addEventListener('click', async () => {
+  if (!S.pkg) return;
+  const files = S.pkg.images.map(i => ({ name: i.name, data: imageBytes(i.name) })).filter(f => f.data);
+  const out = makeZip(files);
+  await saveBlob(`${S.pkg.manifest?.package || 'rpk'}-images.zip`, out);
+  snack(`已导出 ${files.length} 张图片`);
+});
+
+/* 编辑器 */
+for (const b of $('edModes').children) {
+  b.addEventListener('click', () => setMode(b.dataset.mode));
+}
+$('edW').addEventListener('input', onWidthInput);
+$('edH').addEventListener('input', onHeightInput);
+$('edLock').addEventListener('click', () => {
+  Ed.lock = !Ed.lock;
+  $('edLock').setAttribute('aria-pressed', String(Ed.lock));
+});
+$('edZoom').addEventListener('input', e => {
+  Ed.zoom = Number(e.target.value) / 100;
+  $('edZoomVal').textContent = `${e.target.value}%`;
+  draw();
+});
+$('edCircle').addEventListener('change', e => { Ed.circle = e.target.checked; draw(); });
+$('edApply').addEventListener('click', applyEditor);
+$('edPick').addEventListener('click', () => { S.pending = { name: Ed.name }; $('imageInput').click(); });
+
+/* 拖动画布 */
+let drag = null;
+$('edCanvas').addEventListener('pointerdown', e => {
+  if (Ed.mode !== 'cover') return;
+  drag = { x: e.clientX, y: e.clientY, dx: Ed.dx, dy: Ed.dy };
+  $('edCanvas').setPointerCapture(e.pointerId);
+});
+$('edCanvas').addEventListener('pointermove', e => {
+  if (!drag) return;
+  const k = $('edCanvas').width / Math.max(1, $('edCanvas').getBoundingClientRect().width);
+  Ed.dx = drag.dx + (e.clientX - drag.x) * k;
+  Ed.dy = drag.dy + (e.clientY - drag.y) * k;
+  draw();
+});
+$('edCanvas').addEventListener('pointerup', () => { drag = null; });
+$('edCanvas').addEventListener('pointercancel', () => { drag = null; });
+
+/* 签名 */
+$('sigToggle').addEventListener('click', () => expandSignature($('sigBody').hidden));
+$('genId').addEventListener('click', generateIdentity);
+$('loadKey').addEventListener('click', () => $('keyInput').click());
+$('keyInput').addEventListener('change', async e => {
+  const files = [...(e.target.files || [])];
+  e.target.value = '';
+  if (files.length) await importIdentityFiles(files);
+});
+$('exportId').addEventListener('click', () => exportIdentityPart('key'));
+$('exportCert').addEventListener('click', () => exportIdentityPart('cert'));
+$('exportPub').addEventListener('click', () => exportIdentityPart('pub'));
+$('exportZip').addEventListener('click', () => exportIdentityPart('zip'));
+$('copyFingerprint').addEventListener('click', async () => {
+  if (!S.identity) return;
+  const text = fingerprint();
+  try { await navigator.clipboard.writeText(text); snack('指纹已复制'); }
+  catch { snack(text); }
+});
+
+for (const b of $('idMode').children) {
+  b.addEventListener('click', () => {
+    S.idMode = b.dataset.mode;
+    for (const x of $('idMode').children) x.setAttribute('aria-pressed', String(x === b));
+    $('idManual').hidden = S.idMode !== 'manual';
+    if (S.idMode === 'auto' && !$('cnInput').value) $('cnInput').value = '';
+  });
 }
 
-function openHistorySheet(item) {
-  const actions = [
-    {
-      label: '复制包名',
-      icon: 'M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z',
-      onPick: async () => {
-        try { await navigator.clipboard.writeText(item.pkg || ''); snack('已复制包名'); }
-        catch { snack(item.pkg || '—'); }
-      },
-    },
-    {
-      label: '删除这条记录',
-      icon: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
-      danger: true,
-      onPick: () => {
-        writeHistory(readHistory().filter(x => x.id !== item.id));
-        renderHistory();
-        updateHistoryHint();
-        snack('已删除');
-      },
-    },
-  ];
-  openSheet(item.pkg || item.file || '记录', actions);
+/* 导出 */
+$('exportBtn').addEventListener('click', doExport);
+$('recentShare').addEventListener('click', async () => {
+  if (!S.lastExport) return;
+  await shareBlob(S.lastExport.name, S.lastExport.bytes);
+});
+$('optVerify').addEventListener('change', e => { S.settings.optVerify = e.target.checked; saveSettings(); });
+$('optWatch').addEventListener('change', e => { S.settings.optWatch = e.target.checked; saveSettings(); });
+
+/* 工具箱 */
+$('toolDisguise').addEventListener('click', async () => {
+  if (!S.pkg) { snack('先载入一个包'); return; }
+  openLayer('tb');
+  await renderToolbox();
+});
+for (const b of $('tbTabs').children) {
+  b.addEventListener('click', async () => {
+    S.tbOs = b.dataset.os;
+    for (const x of $('tbTabs').children) x.setAttribute('aria-pressed', String(x === b));
+    await renderToolbox();
+  });
 }
 
-/* 入口 */
-$('openTerms').addEventListener('click', () => openGate('view'));
-
+/* 历史 */
 $('clearHistory').addEventListener('click', () => {
-  if (!readHistory().length) return;
+  if (!S.history.length) return;
   openSheet('清空全部历史记录？', [
     {
       label: '清空，无法恢复',
-      icon: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
       danger: true,
-      onPick: () => {
-        writeHistory([]);
-        renderHistory();
-        updateHistoryHint();
-        snack('历史记录已清空');
+      icon: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+      onPick: async () => {
+        await dbClear('history');
+        await refreshHistory();
+        snack('已清空');
       },
     },
   ]);
 });
 
-renderHistory();
-renderTermsHint();
-initConsent();
+/* 设置 */
+for (const b of $('themeSeg').children) {
+  b.addEventListener('click', () => {
+    S.settings.theme = b.dataset.themeChoice;
+    applyTheme(S.settings.theme);
+    saveSettings();
+  });
+}
+$('openStorage').addEventListener('click', async () => {
+  renderSettingsPage();
+  await updateStorageHint();
+  openLayer('storage');
+});
+$('openTerms').addEventListener('click', () => openGate('view'));
+
+$('stRecord').addEventListener('change', e => { S.settings.record = e.target.checked; saveSettings(); });
+$('stFiles').addEventListener('change', e => { S.settings.storeFiles = e.target.checked; saveSettings(); });
+$('stIdentity').addEventListener('change', async e => {
+  S.settings.autoIdentity = e.target.checked;
+  saveSettings();
+  if (S.settings.autoIdentity) await persistIdentity();
+  else await dbDel('kv', 'identity');
+  updateStorageHint();
+});
+$('stClearHistory').addEventListener('click', async () => {
+  await dbClear('history');
+  await refreshHistory();
+  snack('历史已清空');
+});
+$('stClearIdentity').addEventListener('click', async () => {
+  await dbDel('kv', 'identity');
+  S.identity = null;
+  renderIdentity();
+  await updateStorageHint();
+  snack('身份已删除');
+});
+$('updAuto').addEventListener('change', e => { S.settings.updAuto = e.target.checked; saveSettings(); });
+$('updMirror').addEventListener('change', e => { S.settings.updMirror = e.target.value.trim(); saveSettings(); });
+$('updCheck').addEventListener('click', () => checkUpdate(true));
+
+$('aboutVersion').textContent = `${VERSION.name} · Material 3`;
+
+/* 启动时的静默检查 */
+if (S.settings.updAuto) setTimeout(() => checkUpdate(false), 2500);

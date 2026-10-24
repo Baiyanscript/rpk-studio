@@ -7,11 +7,11 @@
 <link rel="icon" href="data:,">
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
-<link rel="stylesheet" href="assets/md3.css?v=20261024123336">
+<link rel="stylesheet" href="assets/md3.css?v=20261024223441">
 </head>
 <body>
 <div id="fatal" class="md-fatal" hidden></div>
-<script>window.__PAGE_VERSION__ = '20261024123336';</script>
+<script>window.__PAGE_VERSION__ = '20261024223441';</script>
 <script>
 window.addEventListener('error', function (e) {
   var bar = document.getElementById('fatal');
@@ -36,18 +36,15 @@ window.addEventListener('error', function (e) {
   <div class="md-pager" id="pager">
     <div class="md-track" id="track">
 
+      <!-- 包 -->
       <section class="md-page" data-page="overview">
         <div class="md-page__inner">
-          <div class="md-page__head">
-            <p class="md-body-medium md-muted">读结构、验签名。左右滑动可切换页面。</p>
-          </div>
-
           <div class="md-drop" id="drop" tabindex="0" role="button" aria-label="选择 RPK 文件">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 3 6 9h4v8h4V9h4l-6-6ZM5 19h14v2H5v-2Z"/>
             </svg>
-            <span class="md-title-small">拖入 .rpk 文件</span>
-            <span class="md-body-small md-muted">或点击选择，全部解析在本机完成</span>
+            <span class="md-title-small">选择或拖入 .rpk</span>
+            <span class="md-body-small md-muted">解析在本机完成，不上传</span>
             <input type="file" id="fileInput" accept=".rpk,.bin,.zip" hidden>
           </div>
 
@@ -78,12 +75,9 @@ window.addEventListener('error', function (e) {
         </div>
       </section>
 
+      <!-- 编辑 -->
       <section class="md-page" data-page="edit">
         <div class="md-page__inner">
-          <div class="md-page__head">
-            <p class="md-body-medium md-muted">应用信息、图标与包内资源。</p>
-          </div>
-
           <div class="md-card md-card--outlined md-stack">
             <label class="md-field">
               <input id="fName" disabled placeholder=" ">
@@ -111,8 +105,8 @@ window.addEventListener('error', function (e) {
             <div class="md-icon-row">
               <div class="md-icon-preview" id="iconPreview"><span class="md-body-small md-muted">无</span></div>
               <div class="md-grow">
-                <div class="md-body-medium" id="iconHint">100 × 100 PNG</div>
-                <div class="md-body-small md-muted">替换后可裁成圆形</div>
+                <div class="md-body-medium" id="iconHint">—</div>
+                <div class="md-body-small md-muted">替换后可调整尺寸与裁剪</div>
               </div>
               <button class="md-btn md-btn--outlined" id="pickIcon" type="button" disabled>替换</button>
               <input type="file" id="imageInput" accept="image/png,image/jpeg,image/webp" hidden>
@@ -145,43 +139,81 @@ window.addEventListener('error', function (e) {
             <ul class="md-list" id="fileList" hidden></ul>
             <p class="md-render-state" id="listStatus" hidden></p>
           </div>
-        </div>
-      </section>
 
-      <section class="md-page" data-page="export">
-        <div class="md-page__inner">
-          <div class="md-page__head">
-            <p class="md-body-medium md-muted">设好签名身份，导出时重新打包并签名。</p>
-          </div>
+          <!-- 签名：默认收起 -->
+          <div class="md-card md-card--outlined" id="sigBlock">
+            <button class="md-card__head md-expand" id="sigToggle" type="button" aria-expanded="false">
+              <span class="md-title-medium">签名与导出</span>
+              <span class="md-row md-row--tight">
+                <span class="md-chip" id="idChip">未设置</span>
+                <span class="md-expand__chev" aria-hidden="true">›</span>
+              </span>
+            </button>
 
-          <div class="md-card md-card--filled" id="idCard">
-            <div class="md-card__head">
-              <span class="md-title-medium" id="idName">未设置</span>
-              <span class="md-chip" id="idChip">待生成</span>
+            <div class="md-collapse" id="sigBody" hidden>
+              <div class="md-id">
+                <div class="md-id__text">
+                  <div class="md-body-medium" id="idName">未设置身份</div>
+                  <div class="md-body-small md-muted" id="idSub">导出前需要一把私钥</div>
+                </div>
+                <button class="md-btn md-btn--text" id="copyFingerprint" type="button" disabled>指纹</button>
+              </div>
+
+              <div class="md-segmented md-segmented--fill" id="idMode" role="group" aria-label="生成方式">
+                <button type="button" data-mode="auto" aria-pressed="true">自动生成</button>
+                <button type="button" data-mode="manual" aria-pressed="false">手动填写</button>
+              </div>
+
+              <label class="md-field md-field--dense">
+                <input id="cnInput" placeholder=" " spellcheck="false">
+                <span>证书名称 CN</span>
+              </label>
+
+              <div id="idManual" hidden>
+                <div class="md-row">
+                  <label class="md-field md-field--dense md-grow">
+                    <input id="orgInput" placeholder=" " spellcheck="false">
+                    <span>组织 O</span>
+                  </label>
+                  <label class="md-field md-field--dense md-grow">
+                    <input id="ouInput" placeholder=" " spellcheck="false">
+                    <span>部门 OU</span>
+                  </label>
+                </div>
+                <div class="md-row">
+                  <label class="md-field md-field--dense md-grow">
+                    <input id="countryInput" placeholder=" " spellcheck="false" maxlength="2">
+                    <span>国家 C（两位）</span>
+                  </label>
+                  <label class="md-field md-field--dense md-grow">
+                    <input id="daysInput" type="number" inputmode="numeric" placeholder=" ">
+                    <span>有效期（天）</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="md-row">
+                <button class="md-btn md-btn--filled md-grow" id="genId" type="button">生成身份</button>
+                <button class="md-btn md-btn--outlined md-grow" id="loadKey" type="button">导入</button>
+                <input type="file" id="keyInput" accept=".pem,.key,.txt,.der,.crt,.cer,.pub,.p12,.pfx" multiple hidden>
+              </div>
+
+              <div class="md-row md-row--wrap" id="idExportRow">
+                <button class="md-btn md-btn--text" id="exportId" type="button" disabled>导出私钥</button>
+                <button class="md-btn md-btn--text" id="exportCert" type="button" disabled>导出证书</button>
+                <button class="md-btn md-btn--text" id="exportPub" type="button" disabled>导出公钥</button>
+                <button class="md-btn md-btn--text" id="exportZip" type="button" disabled>身份包</button>
+              </div>
+
+              <p class="md-body-small md-muted" id="idHint">身份自动保存在本机，可在设置里关闭。</p>
             </div>
-            <dl class="md-kv" id="idInfo"></dl>
-          </div>
-
-          <div class="md-card md-card--outlined md-stack">
-            <span class="md-title-medium">签名身份</span>
-            <label class="md-field">
-              <input id="cnInput" placeholder=" " spellcheck="false">
-              <span>证书名称（CN）</span>
-            </label>
-            <div class="md-row">
-              <button class="md-btn md-btn--filled md-grow" id="genId" type="button">生成 RSA-2048</button>
-              <button class="md-btn md-btn--outlined md-grow" id="loadKey" type="button">载入私钥</button>
-              <input type="file" id="keyInput" accept=".pem,.key,.txt" hidden>
-            </div>
-            <p class="md-body-small md-muted">生成的是自签证书，有效期 10 年；载入支持 PKCS#8 / PKCS#1。</p>
           </div>
 
           <div class="md-card md-card--outlined">
-            <div class="md-card__head"><span class="md-title-medium">导出设置</span></div>
             <label class="md-switch-row">
               <span>
                 <span class="md-body-medium">导出后自动校验</span>
-                <span class="md-body-small md-muted md-block">重新解析产物，比对三段摘要与逐文件摘要</span>
+                <span class="md-body-small md-muted md-block">重新解析产物并比对摘要</span>
               </span>
               <span class="md-switch">
                 <input type="checkbox" id="optVerify" checked>
@@ -209,18 +241,44 @@ window.addEventListener('error', function (e) {
               <button class="md-btn md-btn--outlined" id="recentShare" type="button">分享</button>
             </div>
           </div>
-
-          <div class="md-row">
-            <button class="md-btn md-btn--outlined md-grow" id="exportId" type="button" disabled>导出签名身份</button>
-            <button class="md-btn md-btn--text md-grow" id="copyFingerprint" type="button" disabled>复制指纹</button>
-          </div>
         </div>
       </section>
 
+      <!-- 工具箱 -->
+      <section class="md-page" data-page="toolbox">
+        <div class="md-page__inner">
+          <div class="md-card md-card--outlined">
+            <button class="md-setting-row" id="toolDisguise" type="button">
+              <span class="md-setting-row__icon">◧</span>
+              <span class="md-grow">
+                <span class="md-body-medium md-block">系统应用伪装</span>
+                <span class="md-body-small md-muted md-block">套用系统应用的图标与名称</span>
+              </span>
+              <span class="md-setting-row__chev">›</span>
+            </button>
+          </div>
+          <p class="md-body-small md-muted" id="toolState">载入包后可用</p>
+        </div>
+      </section>
+
+      <!-- 历史 -->
+      <section class="md-page" data-page="history">
+        <div class="md-page__inner">
+          <div class="md-card md-card--outlined">
+            <div class="md-card__head">
+              <span class="md-title-medium">历史记录</span>
+              <button class="md-btn md-btn--text" id="clearHistory" type="button" disabled>清空</button>
+            </div>
+            <ul class="md-history" id="histList"></ul>
+            <p class="md-render-state" id="histEmpty">还没有记录。载入或导出后会出现在这里。</p>
+          </div>
+          <p class="md-body-small md-muted" id="histUsage">—</p>
+        </div>
+      </section>
+
+      <!-- 设置 -->
       <section class="md-page" data-page="settings">
         <div class="md-page__inner">
-          <p class="md-body-medium md-muted">外观、历史与条款。</p>
-
           <div class="md-card md-card--outlined md-stack">
             <div class="md-card__head"><span class="md-title-medium">外观</span></div>
             <div class="md-segmented" id="themeSeg" role="group" aria-label="外观">
@@ -228,19 +286,17 @@ window.addEventListener('error', function (e) {
               <button type="button" data-theme-choice="light" aria-pressed="false">浅色</button>
               <button type="button" data-theme-choice="dark" aria-pressed="false">深色</button>
             </div>
-            <p class="md-body-small md-muted" id="themeHint">跟随系统设置自动切换。</p>
           </div>
 
           <div class="md-card md-card--outlined">
-            <div class="md-card__head">
-              <span class="md-title-medium">历史记录</span>
-              <button class="md-btn md-btn--text" id="clearHistory" type="button" disabled>清空</button>
-            </div>
-            <ul class="md-history" id="historyList"></ul>
-            <p class="md-render-state" id="historyEmpty">载入或导出一次后会出现在这里，最多保留 60 条。</p>
-          </div>
-
-          <div class="md-card md-card--outlined">
+            <button class="md-setting-row" id="openStorage" type="button">
+              <span class="md-grow">
+                <span class="md-body-medium md-block">历史与存储</span>
+                <span class="md-body-small md-muted md-block" id="storageHint">—</span>
+              </span>
+              <span class="md-setting-row__chev">›</span>
+            </button>
+            <div class="md-divider"></div>
             <button class="md-setting-row" id="openTerms" type="button">
               <span class="md-grow">
                 <span class="md-body-medium md-block">条款与隐私</span>
@@ -250,18 +306,39 @@ window.addEventListener('error', function (e) {
             </button>
           </div>
 
+          <div class="md-card md-card--outlined">
+            <div class="md-card__head"><span class="md-title-medium">更新</span></div>
+            <label class="md-switch-row">
+              <span>
+                <span class="md-body-medium">自动检测更新</span>
+                <span class="md-body-small md-muted md-block">启动时静默检查，有新版本才提示</span>
+              </span>
+              <span class="md-switch">
+                <input type="checkbox" id="updAuto" checked>
+                <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+              </span>
+            </label>
+            <label class="md-field md-field--dense">
+              <input id="updMirror" placeholder=" " spellcheck="false">
+              <span>GitHub 镜像前缀（可留空）</span>
+            </label>
+            <div class="md-row md-row--between">
+              <span class="md-body-small md-muted" id="updState">尚未检查</span>
+              <button class="md-btn md-btn--text" id="updCheck" type="button">检查</button>
+            </div>
+          </div>
+
           <div class="md-card md-card--filled md-stack">
             <div class="md-card__head"><span class="md-title-medium">关于</span></div>
             <dl class="md-kv">
-              <dt>版本</dt><dd>2.2 · Material 3</dd>
+              <dt>作者</dt><dd>hrk_</dd>
+              <dt>版本</dt><dd id="aboutVersion">2.3.0 · Material 3</dd>
               <dt>签名格式</dt><dd>RPK Sig Block 42</dd>
               <dt>算法</dt><dd>RSA-2048 / SHA-256</dd>
-              <dt>运行</dt><dd>纯前端 · 无后端</dd>
             </dl>
             <div class="md-row">
               <a class="md-btn md-btn--text" href="https://github.com/hrk666666/rpk-studio" target="_blank" rel="noopener">源码</a>
               <a class="md-btn md-btn--text" href="https://github.com/hrk666666/rpk-studio/blob/main/LICENSE" target="_blank" rel="noopener">MIT 许可</a>
-              <a class="md-btn md-btn--text" href="docs/rpk-format.md">格式说明</a>
             </div>
           </div>
         </div>
@@ -273,6 +350,7 @@ window.addEventListener('error', function (e) {
 
 <nav class="md-nav-bar" id="navBar" aria-label="主导航"></nav>
 
+<!-- 图片调整 -->
 <section class="md-layer md-layer--editor" id="editorLayer" data-layer="editor" aria-hidden="true">
   <header class="md-layer__bar">
     <button class="md-icon-btn" type="button" data-back aria-label="返回">
@@ -333,7 +411,7 @@ window.addEventListener('error', function (e) {
       <label class="md-switch-row md-switch-row--tight">
         <span>
           <span class="md-body-medium">圆形裁剪</span>
-          <span class="md-body-small md-muted md-block">输出带透明通道的圆形图，适合图标</span>
+          <span class="md-body-small md-muted md-block">输出圆形图标，保留透明通道</span>
         </span>
         <span class="md-switch">
           <input type="checkbox" id="edCircle">
@@ -344,6 +422,96 @@ window.addEventListener('error', function (e) {
       <dl class="md-kv md-kv--tight" id="edInfo"></dl>
 
       <button class="md-btn md-btn--outlined md-btn--block" id="edPick" type="button">换一张图</button>
+    </div>
+  </div>
+</section>
+
+<!-- 工具箱：系统应用伪装 -->
+<section class="md-layer" id="tbLayer" data-layer="tb" aria-hidden="true">
+  <header class="md-layer__bar">
+    <button class="md-icon-btn" type="button" data-back aria-label="返回">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/>
+      </svg>
+    </button>
+    <div class="md-layer__titles">
+      <h2 class="md-layer__title">系统应用伪装</h2>
+      <p class="md-body-small md-muted">只改名称与图标</p>
+    </div>
+  </header>
+
+  <div class="md-layer__body">
+    <div class="md-layer__inner">
+      <div class="md-segmented" id="tbTabs" role="group" aria-label="系统版本">
+        <button type="button" data-os="os4" aria-pressed="true">澎湃 OS 4</button>
+        <button type="button" data-os="os3" aria-pressed="false">澎湃 OS 3</button>
+      </div>
+      <p class="md-body-small md-muted" id="tbHint">选择图标后回到编辑页，包名与版本号不变。</p>
+      <div class="md-grid md-grid--picker" id="tbGrid"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 设置：历史与存储 -->
+<section class="md-layer" id="storageLayer" data-layer="storage" aria-hidden="true">
+  <header class="md-layer__bar">
+    <button class="md-icon-btn" type="button" data-back aria-label="返回">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/>
+      </svg>
+    </button>
+    <div class="md-layer__titles">
+      <h2 class="md-layer__title">历史与存储</h2>
+      <p class="md-body-small md-muted">保存在本机</p>
+    </div>
+  </header>
+
+  <div class="md-layer__body">
+    <div class="md-layer__inner">
+      <div class="md-card md-card--outlined">
+        <label class="md-switch-row">
+          <span>
+            <span class="md-body-medium">记录历史</span>
+            <span class="md-body-small md-muted md-block">关闭后不再写入新记录</span>
+          </span>
+          <span class="md-switch">
+            <input type="checkbox" id="stRecord" checked>
+            <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+          </span>
+        </label>
+        <label class="md-switch-row">
+          <span>
+            <span class="md-body-medium">保存文件本体</span>
+            <span class="md-body-small md-muted md-block">存整包，可在历史里另存、继续编辑</span>
+          </span>
+          <span class="md-switch">
+            <input type="checkbox" id="stFiles" checked>
+            <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+          </span>
+        </label>
+        <label class="md-switch-row">
+          <span>
+            <span class="md-body-medium">自动保存签名身份</span>
+            <span class="md-body-small md-muted md-block">重启后不用重新生成私钥</span>
+          </span>
+          <span class="md-switch">
+            <input type="checkbox" id="stIdentity" checked>
+            <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+          </span>
+        </label>
+      </div>
+
+      <div class="md-card md-card--filled">
+        <div class="md-card__head"><span class="md-title-medium">占用</span></div>
+        <dl class="md-kv md-kv--single" id="stUsage">
+          <dt>历史</dt><dd>—</dd>
+          <dt>签名</dt><dd>—</dd>
+        </dl>
+        <div class="md-row">
+          <button class="md-btn md-btn--outlined md-grow" id="stClearHistory" type="button">清空历史</button>
+          <button class="md-btn md-btn--outlined md-grow" id="stClearIdentity" type="button">删除身份</button>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -364,7 +532,6 @@ window.addEventListener('error', function (e) {
   </div>
 </div>
 
-
 <div class="md-gate" id="consentGate" hidden role="dialog" aria-modal="true" aria-labelledby="gateTitle">
   <header class="md-gate__bar">
     <span class="md-title-medium" id="gateTitle">条款与说明</span>
@@ -374,7 +541,7 @@ window.addEventListener('error', function (e) {
 
   <div class="md-gate__scroll" id="gateScroll" tabindex="0">
     <div class="md-gate__inner">
-      <p class="md-body-small md-muted">版本 1.0 · 2026-10-24</p>
+      <p class="md-body-small md-muted">版本 1.1 · 2026-10-24</p>
       <h1 class="md-title-large">使用前请阅读</h1>
 
       <h2 class="md-title-small">这是什么</h2>
@@ -385,8 +552,8 @@ window.addEventListener('error', function (e) {
       <p class="md-body-small md-prose">禁止：绕过付费或授权；冒充他人发布；未经授权分发他人应用；植入恶意代码；用于违法用途。</p>
 
       <h2 class="md-title-small">数据留在本机</h2>
-      <p class="md-body-small md-prose">没有服务器、账号和数据库。解析、图片处理、打包与签名都在当前进程内完成，运行期不发起网络请求。</p>
-      <p class="md-body-small md-prose">本地只存三项：<code>rpk-theme</code>（外观）、<code>rpk-consent</code>（同意记录）、<code>rpk-history</code>（载入与导出记录，不含文件内容）。私钥只存在内存，刷新即失，只有主动导出才会落盘。</p>
+      <p class="md-body-small md-prose">没有服务器与账号。解析、图片处理、打包、签名都在当前进程内完成。</p>
+      <p class="md-body-small md-prose">本地存储包括：外观偏好、同意记录、历史记录（可含文件本体）、签名身份（私钥与证书）。前三项之外的内容可在设置里单独关闭或清除。开启「自动检测更新」时会访问更新清单，只发送普通 HTTPS 请求，不携带文件内容。</p>
 
       <h2 class="md-title-small">签名与包名</h2>
       <p class="md-body-small md-prose">RPK 签名是包内自洽校验，证明包未被改动，不证明发布者身份。自签包能安装，但不是官方包。</p>
@@ -415,6 +582,6 @@ window.addEventListener('error', function (e) {
 
 <div class="md-snackbar" id="snackbar" role="status" aria-live="polite"></div>
 
-<script src="assets/bundle.js?v=20261024123336" defer></script>
+<script src="assets/bundle.js?v=20261024223441" defer></script>
 </body>
 </html>

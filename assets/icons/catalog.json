@@ -1,0 +1,306 @@
+{
+ "os4": [
+  {
+   "id": "activities",
+   "name": "活动"
+  },
+  {
+   "id": "alarm",
+   "name": "闹钟"
+  },
+  {
+   "id": "alipay",
+   "name": "支付宝"
+  },
+  {
+   "id": "breath",
+   "name": "呼吸训练"
+  },
+  {
+   "id": "calendar",
+   "name": "日历"
+  },
+  {
+   "id": "chronograph",
+   "name": "秒表"
+  },
+  {
+   "id": "compass",
+   "name": "指南针"
+  },
+  {
+   "id": "debug",
+   "name": "调试"
+  },
+  {
+   "id": "find_phone",
+   "name": "查找手机"
+  },
+  {
+   "id": "flashlight",
+   "name": "手电筒"
+  },
+  {
+   "id": "heartrate",
+   "name": "心率"
+  },
+  {
+   "id": "interconnect",
+   "name": "互联互通"
+  },
+  {
+   "id": "lua",
+   "name": "Lua 小程序"
+  },
+  {
+   "id": "media",
+   "name": "音乐控制"
+  },
+  {
+   "id": "mijia",
+   "name": "米家"
+  },
+  {
+   "id": "more",
+   "name": "更多"
+  },
+  {
+   "id": "mute_phone",
+   "name": "静音手机"
+  },
+  {
+   "id": "nfccard",
+   "name": "NFC 卡包"
+  },
+  {
+   "id": "page_turner",
+   "name": "翻页器"
+  },
+  {
+   "id": "perpetual_calendar",
+   "name": "万年历"
+  },
+  {
+   "id": "phone",
+   "name": "电话"
+  },
+  {
+   "id": "recorder",
+   "name": "录音机"
+  },
+  {
+   "id": "remote_camera",
+   "name": "遥控拍照"
+  },
+  {
+   "id": "settings",
+   "name": "设置"
+  },
+  {
+   "id": "sleep",
+   "name": "睡眠"
+  },
+  {
+   "id": "spo2",
+   "name": "血氧 SpO2"
+  },
+  {
+   "id": "sports",
+   "name": "运动"
+  },
+  {
+   "id": "sports_course",
+   "name": "运动课程"
+  },
+  {
+   "id": "sports_record",
+   "name": "运动记录"
+  },
+  {
+   "id": "sports_training",
+   "name": "运动训练"
+  },
+  {
+   "id": "stress",
+   "name": "压力"
+  },
+  {
+   "id": "timer",
+   "name": "倒计时"
+  },
+  {
+   "id": "todolist",
+   "name": "待办事项"
+  },
+  {
+   "id": "voice_aivs",
+   "name": "小爱同学"
+  },
+  {
+   "id": "voice_alexa",
+   "name": "Alexa"
+  },
+  {
+   "id": "weather",
+   "name": "天气"
+  },
+  {
+   "id": "womenhealth",
+   "name": "女性健康"
+  },
+  {
+   "id": "wxpay",
+   "name": "微信支付"
+  }
+ ],
+ "os3": [
+  {
+   "id": "activities",
+   "name": "活动"
+  },
+  {
+   "id": "alarm",
+   "name": "闹钟"
+  },
+  {
+   "id": "alipay",
+   "name": "支付宝"
+  },
+  {
+   "id": "breath",
+   "name": "呼吸训练"
+  },
+  {
+   "id": "calendar",
+   "name": "日历"
+  },
+  {
+   "id": "chronograph",
+   "name": "秒表"
+  },
+  {
+   "id": "compass",
+   "name": "指南针"
+  },
+  {
+   "id": "debug",
+   "name": "调试"
+  },
+  {
+   "id": "find_phone",
+   "name": "查找手机"
+  },
+  {
+   "id": "flashlight",
+   "name": "手电筒"
+  },
+  {
+   "id": "heartrate",
+   "name": "心率"
+  },
+  {
+   "id": "interconnect",
+   "name": "互联互通"
+  },
+  {
+   "id": "lua",
+   "name": "Lua 小程序"
+  },
+  {
+   "id": "media",
+   "name": "音乐控制"
+  },
+  {
+   "id": "mijia",
+   "name": "米家"
+  },
+  {
+   "id": "more",
+   "name": "更多"
+  },
+  {
+   "id": "mute_phone",
+   "name": "静音手机"
+  },
+  {
+   "id": "nfccard",
+   "name": "NFC 卡包"
+  },
+  {
+   "id": "oxygen",
+   "name": "血氧"
+  },
+  {
+   "id": "perpetual_calendar",
+   "name": "万年历"
+  },
+  {
+   "id": "phone",
+   "name": "电话"
+  },
+  {
+   "id": "pressure",
+   "name": "压力"
+  },
+  {
+   "id": "recorder",
+   "name": "录音机"
+  },
+  {
+   "id": "remote_camera",
+   "name": "遥控拍照"
+  },
+  {
+   "id": "settings",
+   "name": "设置"
+  },
+  {
+   "id": "sleep",
+   "name": "睡眠"
+  },
+  {
+   "id": "sports",
+   "name": "运动"
+  },
+  {
+   "id": "sports_course",
+   "name": "运动课程"
+  },
+  {
+   "id": "sports_record",
+   "name": "运动记录"
+  },
+  {
+   "id": "sports_training",
+   "name": "运动训练"
+  },
+  {
+   "id": "timer",
+   "name": "倒计时"
+  },
+  {
+   "id": "todolist",
+   "name": "待办事项"
+  },
+  {
+   "id": "voice_aivs",
+   "name": "小爱同学"
+  },
+  {
+   "id": "voice_alexa",
+   "name": "Alexa"
+  },
+  {
+   "id": "weather",
+   "name": "天气"
+  },
+  {
+   "id": "womenhealth",
+   "name": "女性健康"
+  },
+  {
+   "id": "wxpay",
+   "name": "微信支付"
+  }
+ ]
+}
