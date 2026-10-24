@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+// Gradle 的 rustBuild 任务执行 `node tauri ...`；这里转到 android/node_modules 的实现。
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+await import(pathToFileURL(join(here, '..', 'node_modules', '@tauri-apps', 'cli', 'main.js')).href);
