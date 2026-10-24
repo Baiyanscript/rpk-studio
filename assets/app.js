@@ -1772,9 +1772,16 @@ async function loadCatalog() {
 }
 
 async function renderToolbox() {
-  const cat = await loadCatalog();
-  const set = cat[S.tbOs];
   const grid = $('tbGrid');
+  let cat;
+  try {
+    cat = await loadCatalog();
+  } catch (e) {
+    grid.textContent = '';
+    grid.appendChild(el('p', 'md-body-small md-muted', '图标库读取失败'));
+    return;
+  }
+  const set = cat[S.tbOs];
   grid.textContent = '';
   for (const item of set) {
     const tile = el('div', 'md-tile');
