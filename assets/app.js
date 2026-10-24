@@ -41,6 +41,7 @@ const S = {
   dupes: null,
   layer: null,
   stale: false,
+  lastExport: null,
 };
 
 const fmtSize = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
@@ -137,6 +138,29 @@ async function saveBlob(name, bytes) {
       return false;
     }
   }
+  download(name, bytes);
+  return true;
+}
+
+async function shareBlob(name, bytes) {
+  if (IN_TAURI) {
+    try {
+      await window.__TAURI__.core.invoke('share_bytes', { name, base64: bytesToBase64(bytes) });
+      return true;
+    } catch (e) {
+      snack(`分享失败：${e}`);
+      return false;
+    }
+  }
+
+  const file = new File([bytes], name, { type: 'application/octet-stream' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: name });
+      return true;
+    } catch {}
+  }
+
   download(name, bytes);
   return true;
 }
@@ -1248,6 +1272,14 @@ async function loadFile(file) {
 
     const v = pkg.verify;
     const ok = v && v.digestOk && v.rsaOk && v.badFiles === 0;
+    addHistory({
+      kind: 'load',
+      file: file.name,
+      pkg: pkg.manifest?.package || '',
+      name: pkg.manifest?.name || '',
+      version: pkg.manifest?.versionName || '',
+      size: file.size,
+    });
     snack(`解析完成 ${Math.round(performance.now() - t0)} ms · ${v ? (ok ? '签名有效' : '签名异常') : '未签名'}`);
   } catch (e) {
     setChip('bad', '无法解析');
@@ -1475,6 +1507,11 @@ $('copyFingerprint').addEventListener('click', async () => {
 
 $('exportBtn').addEventListener('click', doExport);
 
+$('recentShare').addEventListener('click', async () => {
+  if (!S.lastExport) { snack('还没有可分享的导出'); return; }
+  await shareBlob(S.lastExport.name, S.lastExport.bytes);
+});
+
 /* 编辑器 */
 
 $('edModes').addEventListener('click', e => {
@@ -1597,3 +1634,266 @@ renderDirty();
 renderImages();
 $('topTitle').textContent = PAGES[0].label;
 setTrack(0, false);
+
+/* ---------- 首次启动协议 ---------- */
+
+const CONSENT_KEY = 'rpk-consent-v1';
+
+function readConsent() {
+  try { return JSON.parse(localStorage.getItem(CONSENT_KEY) || 'null'); } catch { return null; }
+}
+
+let gateMode = 'first';
+let gateUnlocked = false;
+let gateBound = false;
+
+function gateEls() {
+  const gate = $('consentGate');
+  return {
+    gate,
+    scroll: $('gateScroll'),
+    boxes: [...gate.querySelectorAll('.md-consent input')],
+    locks: [...gate.querySelectorAll('.md-consent')],
+    accept: $('gateAccept'),
+    decline: $('gateDecline'),
+    warn: $('gateWarn'),
+    pct: $('gatePct'),
+  };
+}
+
+function gateRefresh() {
+  const { scroll, boxes, accept, pct } = gateEls();
+  const max = scroll.scrollHeight - scroll.clientHeight;
+  const ratio = max <= 0 ? 1 : scroll.scrollTop / max;
+
+  if (!gateUnlocked && ratio >= 0.999) {
+    gateUnlocked = true;
+    const els = gateEls();
+    for (const b of els.boxes) b.disabled = false;
+    for (const n of els.locks) n.classList.remove('is-locked');
+  }
+
+  if (gateMode === 'view') {
+    pct.textContent = '已同意';
+    accept.disabled = false;
+    return;
+  }
+
+  pct.textContent = gateUnlocked
+    ? '已读 100% · 可以勾选'
+    : `已读 ${Math.min(99, Math.round(ratio * 100))}%`;
+  accept.disabled = !(gateUnlocked && boxes.every(b => b.checked));
+}
+
+function bindGate() {
+  if (gateBound) return;
+  gateBound = true;
+
+  const els = gateEls();
+  els.scroll.addEventListener('scroll', gateRefresh, { passive: true });
+
+  for (const b of els.boxes) {
+    b.addEventListener('change', () => {
+      b.closest('.md-consent').classList.toggle('is-signed', b.checked);
+      gateRefresh();
+    });
+  }
+
+  els.accept.addEventListener('click', () => {
+    if (gateMode === 'view') {
+      els.gate.hidden = true;
+      return;
+    }
+    try {
+      localStorage.setItem(CONSENT_KEY, JSON.stringify({
+        accepted: true,
+        at: new Date().toISOString(),
+        version: 1,
+        items: ['terms', 'privacy', 'risk'],
+      }));
+    } catch {}
+    els.gate.hidden = true;
+    document.body.classList.remove('is-busy');
+    snack('已同意条款');
+  });
+
+  els.decline.addEventListener('click', () => {
+    els.warn.hidden = false;
+    els.warn.textContent = '不同意将无法使用本工具的任何功能。你可以关闭此页面，或继续阅读后同意。';
+  });
+}
+
+function openGate(mode) {
+  bindGate();
+  gateMode = mode;
+  gateUnlocked = false;
+
+  const els = gateEls();
+  els.gate.hidden = false;
+  els.scroll.scrollTop = 0;
+  els.warn.hidden = true;
+
+  if (mode === 'view') {
+    gateUnlocked = true;
+    for (const b of els.boxes) {
+      b.checked = true;
+      b.disabled = true;
+      b.closest('.md-consent').classList.add('is-signed');
+      b.closest('.md-consent').classList.remove('is-locked');
+    }
+    els.accept.textContent = '关闭';
+    els.accept.disabled = false;
+    els.accept.classList.remove('md-btn--filled');
+    els.accept.classList.add('md-btn--outlined');
+    els.decline.hidden = true;
+  } else {
+    for (const b of els.boxes) {
+      b.checked = false;
+      b.disabled = true;
+      b.closest('.md-consent').classList.remove('is-signed');
+      b.closest('.md-consent').classList.add('is-locked');
+    }
+    els.accept.textContent = '同意并继续';
+    els.accept.classList.add('md-btn--filled');
+    els.accept.classList.remove('md-btn--outlined');
+    els.accept.disabled = true;
+    els.decline.hidden = false;
+    document.body.classList.add('is-busy');
+  }
+
+  requestAnimationFrame(gateRefresh);
+}
+
+function initConsent() {
+  const saved = readConsent();
+  if (saved && saved.accepted) return;
+  openGate('first');
+}
+
+/* ---------- 历史记录 ---------- */
+
+const HISTORY_KEY = 'rpk-history';
+const HISTORY_MAX = 60;
+
+function readHistory() {
+  try {
+    const v = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+
+function writeHistory(list) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX))); } catch {}
+}
+
+function addHistory(entry) {
+  const list = readHistory();
+  list.unshift({
+    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    at: new Date().toISOString(),
+    ...entry,
+  });
+  writeHistory(list);
+  updateHistoryHint();
+  if (S.layer === 'history') renderHistory();
+}
+
+function updateHistoryHint() {
+  const n = readHistory().length;
+  const hint = $('historyHint');
+  if (hint) hint.textContent = n ? `${n} 条记录` : '还没有记录';
+  const clear = $('clearHistory');
+  if (clear) clear.disabled = n === 0;
+}
+
+function timeLabel(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (d.toDateString() === now.toDateString()) return hm;
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
+}
+
+function renderHistory() {
+  const list = readHistory();
+  const ul = $('historyList');
+  ul.textContent = '';
+  $('historyEmpty').hidden = list.length > 0;
+  $('clearHistory').disabled = list.length === 0;
+
+  for (const item of list) {
+    const li = document.createElement('li');
+    const btn = el('button', 'md-history__item');
+    btn.type = 'button';
+
+    const kind = el('span', `md-history__kind md-history__kind--${item.kind === 'export' ? 'export' : 'load'}`,
+      item.kind === 'export' ? '导出' : '载入');
+
+    const body = el('span', 'md-history__body');
+    body.append(
+      el('span', 'md-body-medium', item.pkg || item.file || '—'),
+      el('span', 'md-history__meta',
+        [item.name, item.version, item.size ? fmtSize(item.size) : ''].filter(Boolean).join(' · ')),
+    );
+
+    btn.append(kind, body, el('span', 'md-history__time', timeLabel(item.at)));
+    btn.addEventListener('click', () => openHistorySheet(item));
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+}
+
+function openHistorySheet(item) {
+  const actions = [
+    {
+      label: '复制包名',
+      icon: 'M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z',
+      onPick: async () => {
+        try { await navigator.clipboard.writeText(item.pkg || ''); snack('已复制包名'); }
+        catch { snack(item.pkg || '—'); }
+      },
+    },
+    {
+      label: '删除这条记录',
+      icon: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+      danger: true,
+      onPick: () => {
+        writeHistory(readHistory().filter(x => x.id !== item.id));
+        renderHistory();
+        updateHistoryHint();
+        snack('已删除');
+      },
+    },
+  ];
+  openSheet(item.pkg || item.file || '记录', actions);
+}
+
+/* 协议与历史的入口 */
+$('openHistory').addEventListener('click', () => {
+  openLayer('history');
+  renderHistory();
+});
+
+$('openTerms').addEventListener('click', () => openGate('view'));
+
+$('clearHistory').addEventListener('click', () => {
+  if (!readHistory().length) return;
+  openSheet('清空全部历史记录？', [
+    {
+      label: '清空，无法恢复',
+      icon: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+      danger: true,
+      onPick: () => {
+        writeHistory([]);
+        renderHistory();
+        updateHistoryHint();
+        snack('历史记录已清空');
+      },
+    },
+  ]);
+});
+
+updateHistoryHint();
+initConsent();
