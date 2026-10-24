@@ -1,3 +1,7 @@
 node_modules/
 package-lock.json
 *.log
+android/node_modules/
+android/dist/
+android/src-tauri/gen/
+android/src-tauri/target/
