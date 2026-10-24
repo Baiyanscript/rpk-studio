@@ -4,8 +4,7 @@
   "version": "2.1.0",
   "identifier": "io.github.hrk666666.rpkstudio",
   "build": {
-    "frontendDist": "../dist",
-    "beforeBuildCommand": "node ../build-app.mjs"
+    "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
