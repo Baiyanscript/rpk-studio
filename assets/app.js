@@ -1635,7 +1635,7 @@ renderImages();
 $('topTitle').textContent = PAGES[0].label;
 setTrack(0, false);
 
-/* ---------- 首次启动协议 ---------- */
+/* ---------- 条款 ---------- */
 
 const CONSENT_KEY = 'rpk-consent-v1';
 
@@ -1644,129 +1644,117 @@ function readConsent() {
 }
 
 let gateMode = 'first';
-let gateUnlocked = false;
 let gateBound = false;
-
-function gateEls() {
-  const gate = $('consentGate');
-  return {
-    gate,
-    scroll: $('gateScroll'),
-    boxes: [...gate.querySelectorAll('.md-consent input')],
-    locks: [...gate.querySelectorAll('.md-consent')],
-    accept: $('gateAccept'),
-    decline: $('gateDecline'),
-    warn: $('gateWarn'),
-    pct: $('gatePct'),
-  };
-}
-
-function gateRefresh() {
-  const { scroll, boxes, accept, pct } = gateEls();
-  const max = scroll.scrollHeight - scroll.clientHeight;
-  const ratio = max <= 0 ? 1 : scroll.scrollTop / max;
-
-  if (!gateUnlocked && ratio >= 0.999) {
-    gateUnlocked = true;
-    const els = gateEls();
-    for (const b of els.boxes) b.disabled = false;
-    for (const n of els.locks) n.classList.remove('is-locked');
-  }
-
-  if (gateMode === 'view') {
-    pct.textContent = '已同意';
-    accept.disabled = false;
-    return;
-  }
-
-  pct.textContent = gateUnlocked
-    ? '已读 100% · 可以勾选'
-    : `已读 ${Math.min(99, Math.round(ratio * 100))}%`;
-  accept.disabled = !(gateUnlocked && boxes.every(b => b.checked));
-}
 
 function bindGate() {
   if (gateBound) return;
   gateBound = true;
 
-  const els = gateEls();
-  els.scroll.addEventListener('scroll', gateRefresh, { passive: true });
+  const scroll = $('gateScroll');
+  const box = $('gateConsent').querySelector('input');
+  const accept = $('gateAccept');
 
-  for (const b of els.boxes) {
-    b.addEventListener('change', () => {
-      b.closest('.md-consent').classList.toggle('is-signed', b.checked);
-      gateRefresh();
-    });
-  }
+  const refresh = () => {
+    const max = scroll.scrollHeight - scroll.clientHeight;
+    const ratio = max <= 0 ? 1 : Math.min(1, scroll.scrollTop / max);
+    $('gateBar').style.width = `${(ratio * 100).toFixed(1)}%`;
 
-  els.accept.addEventListener('click', () => {
     if (gateMode === 'view') {
-      els.gate.hidden = true;
+      accept.disabled = false;
       return;
     }
-    try {
-      localStorage.setItem(CONSENT_KEY, JSON.stringify({
-        accepted: true,
-        at: new Date().toISOString(),
-        version: 1,
-        items: ['terms', 'privacy', 'risk'],
-      }));
-    } catch {}
-    els.gate.hidden = true;
-    document.body.classList.remove('is-busy');
-    snack('已同意条款');
+
+    const atEnd = ratio >= 0.999;
+    if (atEnd && box.disabled) {
+      box.disabled = false;
+      $('gateConsent').classList.remove('is-locked');
+    }
+    accept.disabled = !(atEnd && box.checked);
+  };
+
+  scroll.addEventListener('scroll', refresh, { passive: true });
+
+  box.addEventListener('change', () => {
+    $('gateConsent').classList.toggle('is-signed', box.checked);
+    refresh();
   });
 
-  els.decline.addEventListener('click', () => {
-    els.warn.hidden = false;
-    els.warn.textContent = '不同意将无法使用本工具的任何功能。你可以关闭此页面，或继续阅读后同意。';
+  accept.addEventListener('click', () => {
+    if (gateMode === 'first') {
+      try {
+        localStorage.setItem(CONSENT_KEY, JSON.stringify({
+          accepted: true,
+          at: new Date().toISOString(),
+          version: 1,
+        }));
+      } catch {}
+      renderTermsHint();
+    }
+    closeGate();
   });
+
+  gateRefresh = refresh;
+}
+
+let gateRefresh = () => {};
+
+function closeGate() {
+  const gate = $('consentGate');
+  gate.classList.add('is-closing');
+  document.body.classList.remove('is-busy');
+  setTimeout(() => {
+    gate.hidden = true;
+    gate.classList.remove('is-closing');
+  }, 220);
 }
 
 function openGate(mode) {
   bindGate();
   gateMode = mode;
-  gateUnlocked = false;
 
-  const els = gateEls();
-  els.gate.hidden = false;
-  els.scroll.scrollTop = 0;
-  els.warn.hidden = true;
+  const gate = $('consentGate');
+  const scroll = $('gateScroll');
+  const box = $('gateConsent').querySelector('input');
+  const label = $('gateConsent');
+  const accept = $('gateAccept');
+
+  gate.hidden = false;
+  gate.classList.remove('is-closing');
+  scroll.scrollTop = 0;
 
   if (mode === 'view') {
-    gateUnlocked = true;
-    for (const b of els.boxes) {
-      b.checked = true;
-      b.disabled = true;
-      b.closest('.md-consent').classList.add('is-signed');
-      b.closest('.md-consent').classList.remove('is-locked');
-    }
-    els.accept.textContent = '关闭';
-    els.accept.disabled = false;
-    els.accept.classList.remove('md-btn--filled');
-    els.accept.classList.add('md-btn--outlined');
-    els.decline.hidden = true;
+    box.checked = true;
+    box.disabled = true;
+    label.classList.add('is-signed');
+    label.classList.remove('is-locked');
+    accept.textContent = '关闭';
+    $('gateBar').style.width = '100%';
   } else {
-    for (const b of els.boxes) {
-      b.checked = false;
-      b.disabled = true;
-      b.closest('.md-consent').classList.remove('is-signed');
-      b.closest('.md-consent').classList.add('is-locked');
-    }
-    els.accept.textContent = '同意并继续';
-    els.accept.classList.add('md-btn--filled');
-    els.accept.classList.remove('md-btn--outlined');
-    els.accept.disabled = true;
-    els.decline.hidden = false;
+    box.checked = false;
+    box.disabled = true;
+    label.classList.remove('is-signed');
+    label.classList.add('is-locked');
+    accept.textContent = '继续';
+    accept.disabled = true;
+    $('gateBar').style.width = '0%';
     document.body.classList.add('is-busy');
   }
 
   requestAnimationFrame(gateRefresh);
 }
 
+function renderTermsHint() {
+  const saved = readConsent();
+  const hint = $('termsHint');
+  if (!hint) return;
+  hint.textContent = saved?.accepted
+    ? `已于 ${new Date(saved.at).toLocaleString('zh-CN', { hour12: false })} 同意`
+    : '查看条款与隐私说明';
+}
+
 function initConsent() {
   const saved = readConsent();
-  if (saved && saved.accepted) return;
+  if (saved && saved.accepted) { renderTermsHint(); return; }
   openGate('first');
 }
 
@@ -1794,16 +1782,12 @@ function addHistory(entry) {
     ...entry,
   });
   writeHistory(list);
-  updateHistoryHint();
-  if (S.layer === 'history') renderHistory();
+  renderHistory();
 }
 
 function updateHistoryHint() {
-  const n = readHistory().length;
-  const hint = $('historyHint');
-  if (hint) hint.textContent = n ? `${n} 条记录` : '还没有记录';
   const clear = $('clearHistory');
-  if (clear) clear.disabled = n === 0;
+  if (clear) clear.disabled = readHistory().length === 0;
 }
 
 function timeLabel(iso) {
@@ -1870,12 +1854,7 @@ function openHistorySheet(item) {
   openSheet(item.pkg || item.file || '记录', actions);
 }
 
-/* 协议与历史的入口 */
-$('openHistory').addEventListener('click', () => {
-  openLayer('history');
-  renderHistory();
-});
-
+/* 入口 */
 $('openTerms').addEventListener('click', () => openGate('view'));
 
 $('clearHistory').addEventListener('click', () => {
@@ -1895,5 +1874,6 @@ $('clearHistory').addEventListener('click', () => {
   ]);
 });
 
-updateHistoryHint();
+renderHistory();
+renderTermsHint();
 initConsent();
