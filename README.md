@@ -46,8 +46,13 @@
 
 **设置**
 - 外观：跟随系统 / 浅色 / 深色
-- 隐私：运行期不发送文件、不加载追踪脚本、只存 `rpk-theme`
-- 安全提示、第三方许可（MIT / fflate）、免责声明
+- 历史记录：载入与导出各记一条，可查看、删除单条、清空，最多 60 条
+- 服务条款与隐私：随时回看，标记同意时间
+- 隐私说明、安全提示、第三方许可、免责声明
+
+## 首次启动
+
+第一次打开会挡住界面，要求阅读《服务条款》《隐私政策》《风险与免责》三部分。**必须滚动到文末**，三项勾选框才会解锁；三项全部勾选后才能点「同意并继续」。同意记录写入 `rpk-consent-v1`（含时间与版本号），之后不再打扰，可在设置里回看。
 
 ## 大包不卡的做法
 
@@ -73,7 +78,7 @@
 
 签名算法固定为 RSA-2048 + SHA-256（PKCS#1 v1.5），与 `aiot release` 一致。
 
-**MT 管理器不能重签 RPK**：它只认 APK 的 v1/v2/v3 签名方案，RPK 用的是小米私有的 `RPK Sig Block 42`（签名块插在中央目录之前，覆盖三段哈希 + 逐文件摘要）。这个页面本身就是重签工具。
+RPK 使用小米私有的 `RPK Sig Block 42`：签名块插在中央目录之前，覆盖 header / central / EOCD 三段哈希，外加每个文件的 `CRC32(路径) + SHA-256`。常见 APK 签名工具只认 JAR signing 与 APK Signing Block，无法处理这个结构。`aiot release` 产出的包，改完内容后用这里的身份重签即可。
 
 命令行复现：
 
@@ -85,9 +90,15 @@ openssl pkcs12 -export -inkey private.pem -in certificate.pem -out key.p12
 
 ## 安卓客户端
 
-`android/` 是 Tauri 2 + Rust 的外壳，WebView 加载同一份页面资源，Rust 负责写文件与调系统保存面板。
-构建方式、职责边界与本地验证状态见 [android/README.md](android/README.md)；
-仓库内的 `.github/workflows/android.yml` 可手动触发产出 debug APK。
+`android/` 是 Tauri 2 + Rust 的外壳，WebView 加载同一份页面资源。Rust 侧三个命令：
+
+| 命令 | 作用 |
+|---|---|
+| `save_bytes` | 调系统文件管理器（SAF / ACTION_CREATE_DOCUMENT）选位置，再用 fs 插件写入。`content://` URI 由 ContentResolver 打开，不需要存储权限 |
+| `share_bytes` | 写入应用缓存后交给系统「打开方式」，由系统列出可接收的应用 |
+| `summarize` | 用纯 std 实现算整包 SHA-256 与条目统计，用于导出后核对 |
+
+构建方式、职责边界与验证状态见 [android/README.md](android/README.md)；`.github/workflows/android.yml` 可手动触发产出 debug APK。
 
 ## 目录
 
