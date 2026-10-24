@@ -7,11 +7,11 @@
 <link rel="icon" href="data:,">
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
-<link rel="stylesheet" href="assets/md3.css?v=20261024000255">
+<link rel="stylesheet" href="assets/md3.css?v=20261024122219">
 </head>
 <body>
 <div id="fatal" class="md-fatal" hidden></div>
-<script>window.__PAGE_VERSION__ = '20261024000255';</script>
+<script>window.__PAGE_VERSION__ = '20261024122219';</script>
 <script>
 window.addEventListener('error', function (e) {
   var bar = document.getElementById('fatal');
@@ -202,20 +202,19 @@ window.addEventListener('error', function (e) {
 
           <button class="md-btn md-btn--filled md-btn--block" id="exportBtn" type="button" disabled>导出 RPK</button>
 
+          <div class="md-card md-card--outlined hidden" id="recentCard">
+            <div class="md-card__head"><span class="md-title-medium">最近导出</span></div>
+            <div class="md-row">
+              <span class="md-grow md-body-small" id="recentName">—</span>
+              <button class="md-btn md-btn--outlined" id="recentShare" type="button">分享</button>
+            </div>
+          </div>
+
           <div class="md-row">
             <button class="md-btn md-btn--outlined md-grow" id="exportId" type="button" disabled>导出签名身份</button>
             <button class="md-btn md-btn--text md-grow" id="copyFingerprint" type="button" disabled>复制指纹</button>
           </div>
 
-          <div class="md-card md-card--outlined">
-            <div class="md-card__head"><span class="md-title-medium">关于手机端重签名</span></div>
-            <p class="md-body-small md-muted md-block md-prose">
-              MT 管理器只识别 APK 的 v1/v2/v3 签名，RPK 用的是小米私有的 <code>RPK Sig Block 42</code>，无法用它重签。
-              这个页面本身就是重签工具：载入 rpk → 设好身份 → 导出。
-            </p>
-            <pre class="md-code">openssl pkcs12 -export -inkey private.pem -in certificate.pem -out key.p12</pre>
-          </div>
-        </div>
       </section>
 
       <section class="md-page" data-page="settings">
@@ -232,6 +231,27 @@ window.addEventListener('error', function (e) {
               <button type="button" data-theme-choice="dark" aria-pressed="false">深色</button>
             </div>
             <p class="md-body-small md-muted" id="themeHint">跟随系统设置自动切换。</p>
+          </div>
+
+
+          <div class="md-card md-card--outlined">
+            <button class="md-setting-row" id="openHistory" type="button">
+              <span class="md-setting-row__icon">↺</span>
+              <span class="md-grow">
+                <span class="md-body-medium md-block">历史记录</span>
+                <span class="md-body-small md-muted md-block" id="historyHint">还没有记录</span>
+              </span>
+              <span class="md-setting-row__chev">›</span>
+            </button>
+            <div class="md-divider"></div>
+            <button class="md-setting-row" id="openTerms" type="button">
+              <span class="md-setting-row__icon">§</span>
+              <span class="md-grow">
+                <span class="md-body-medium md-block">服务条款与隐私</span>
+                <span class="md-body-small md-muted md-block">查看已同意的条款全文</span>
+              </span>
+              <span class="md-setting-row__chev">›</span>
+            </button>
           </div>
 
           <div class="md-card md-card--outlined md-stack">
@@ -407,8 +427,217 @@ window.addEventListener('error', function (e) {
   </div>
 </div>
 
+
+<div class="md-gate" id="consentGate" hidden role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+  <header class="md-gate__bar">
+    <span class="md-title-medium" id="gateTitle">使用前请阅读</span>
+    <span class="md-label-medium md-muted" id="gatePct">已读 0%</span>
+  </header>
+
+  <div class="md-gate__scroll" id="gateScroll" tabindex="0">
+    <div class="md-gate__inner">
+      <p class="md-body-small md-muted">版本 1.0 · 生效日期 2026 年 10 月 24 日</p>
+      <h1 class="md-headline-small">服务条款、隐私政策与风险声明</h1>
+      <p class="md-body-medium md-prose">
+        本文件是你在使用 RPK Studio（下称「本工具」）前必须阅读并同意的全部约定。
+        它与普通网站的弹窗不同：三段内容分别对应法律条款、数据处理方式和操作风险，
+        需要你分别确认。请完整滚动到文末，再逐项勾选。
+      </p>
+
+      <h2 class="md-title-large">一、服务条款</h2>
+
+      <h3 class="md-title-small">1. 定义</h3>
+      <p class="md-body-small md-prose">
+        「本工具」指 RPK Studio 的网页版本、安卓客户端，以及随附的源代码与文档。
+        「你」指实际使用本工具的自然人或法人。「产物」指本工具生成的文件，包括但不限于重新打包的 RPK、导出的签名身份与图片归档。
+        「RPK」指 Vela 平台使用的应用分发包格式。
+      </p>
+
+      <h3 class="md-title-small">2. 许可授予</h3>
+      <p class="md-body-small md-prose">
+        本工具源代码以 MIT 许可证发布。在遵守 MIT 许可证的前提下，你可以自由使用、复制、修改、合并、发布、分发、再许可和销售本工具的副本。
+        分发时须保留原始版权声明与许可声明。本条款不改变、不限制 MIT 许可证赋予你的权利；两者冲突时以 MIT 许可证为准。
+      </p>
+
+      <h3 class="md-title-small">3. 使用资格</h3>
+      <p class="md-body-small md-prose">
+        你需要具备与你所在司法辖区相适应的民事行为能力。若你未满法定年龄，应在监护人知情并同意的情况下使用。
+        你应自行确认，在你所在的国家或地区，解析、修改、重新签名应用分发包这一行为本身是合法的。
+      </p>
+
+      <h3 class="md-title-small">4. 允许的用途</h3>
+      <p class="md-body-small md-prose">
+        包括：为你有权修改的应用调整名称、图标、版本与资源；在开发阶段反复打包调试；学习 ZIP 结构、签名块格式与 X.509 证书；
+        在你已获得原作者授权，或原项目许可证允许的情况下，分发修改后的产物。
+      </p>
+
+      <h3 class="md-title-small">5. 禁止的用途</h3>
+      <p class="md-body-small md-prose">
+        包括：移除或绕过付费、授权、试用期限制；冒充他人或组织发布应用；在未获授权的情况下分发他人的应用；
+        植入恶意代码、后门、窃取数据的逻辑；用于违反你所在司法辖区法律法规的任何目的；
+        将本工具用于攻击、干扰或破坏他人设备与服务。
+      </p>
+
+      <h3 class="md-title-small">6. 与平台方的关系</h3>
+      <p class="md-body-small md-prose">
+        本工具是独立的第三方项目，与小米科技、华米科技及其关联公司不存在隶属、合作、赞助或背书关系，也未获得其授权或认可。
+        文中出现的产品名称、平台名称与商标归各自权利人所有，仅用于说明兼容性与技术格式。
+      </p>
+
+      <h3 class="md-title-small">7. 服务状态与变更</h3>
+      <p class="md-body-small md-prose">
+        本工具按开源项目的方式提供，不承诺持续维护、不承诺向后兼容、不承诺修复任何特定缺陷。
+        作者可随时修改、暂停或停止分发，无需事先通知。已发布的源代码副本不受影响。
+      </p>
+
+      <label class="md-consent" data-consent="terms">
+        <input type="checkbox" disabled>
+        <span class="md-consent__box" aria-hidden="true"></span>
+        <span class="md-body-medium">我已阅读并同意上述服务条款</span>
+      </label>
+
+      <h2 class="md-title-large">二、隐私政策</h2>
+
+      <h3 class="md-title-small">1. 没有服务器</h3>
+      <p class="md-body-small md-prose">
+        本工具没有后端服务、没有账号体系、没有数据库。网页版本是托管在静态文件托管平台上的纯前端页面，
+        安卓客户端把同一份页面资源打包进应用，在设备的 WebView 中运行。
+        因此不存在「我们把你的文件传到某台服务器」这一环节。
+      </p>
+
+      <h3 class="md-title-small">2. 处理哪些数据</h3>
+      <p class="md-body-small md-prose">
+        仅处理你主动选择的文件内容（RPK 包）、你在表单中填写的应用名称、包名、版本号与证书名称，
+        以及你在图片编辑器中做的裁剪与缩放操作。这些数据全部留在当前进程内。
+      </p>
+
+      <h3 class="md-title-small">3. 网络传输</h3>
+      <p class="md-body-small md-prose">
+        页面加载完成后，解析、校验、重打包、签名、图片处理均不发起网络请求。
+        首次访问时浏览器需要下载 HTML、样式表、脚本与字体（若有），此后可离线使用。
+        安卓客户端的所有资源随安装包分发，运行期完全离线。
+      </p>
+
+      <h3 class="md-title-small">4. 本地存储</h3>
+      <p class="md-body-small md-prose">
+        本工具在浏览器或 WebView 的 localStorage 中写入三项数据：
+        <code>rpk-theme</code>（外观偏好）、<code>rpk-consent</code>（本文件的同意记录与时间）、
+        <code>rpk-history</code>（你主动导出或载入的记录，含时间、包名、版本、体积）。
+        历史记录不含文件内容本身。三项均可在设置页清除，或通过清除站点数据删除。
+      </p>
+
+      <h3 class="md-title-small">5. 密钥</h3>
+      <p class="md-body-small md-prose">
+        生成的 RSA 私钥只存在于当前页面内存，不做持久化。刷新页面、关闭标签页或系统回收进程后即消失，
+        除非你主动导出。导出的 <code>private.pem</code> 由你自行保管，本工具不上传、不备份、无法找回。
+      </p>
+
+      <h3 class="md-title-small">6. 第三方组件</h3>
+      <p class="md-body-small md-prose">
+        压缩与打包使用 fflate（MIT 许可证），随页面一起分发，不加载远程脚本。
+        页面不包含分析、广告、A/B 测试、会话录制或崩溃上报 SDK。
+        安卓客户端使用 Tauri 与系统 WebView，其自身不收集使用数据。
+      </p>
+
+      <h3 class="md-title-small">7. 保留与删除</h3>
+      <p class="md-body-small md-prose">
+        本工具不保留任何数据副本。本地存储的三项数据由你控制，删除即消失，作者无法访问，也无法代为删除。
+      </p>
+
+      <label class="md-consent" data-consent="privacy">
+        <input type="checkbox" disabled>
+        <span class="md-consent__box" aria-hidden="true"></span>
+        <span class="md-body-medium">我已阅读并同意上述隐私政策</span>
+      </label>
+
+      <h2 class="md-title-large">三、风险与免责</h2>
+
+      <h3 class="md-title-small">1. 签名意味着什么</h3>
+      <p class="md-body-small md-prose">
+        RPK 的签名是「包内自洽校验」：设备用包里附带的公钥验证签名块，并重算每个文件的摘要。
+        它证明的是这个包自签署后没有被改动过，不证明发布者是谁，也不证明内容安全。
+        因此用自签证书重签的包可以安装，但它不是官方包，任何做字节比对的人都能看出区别。
+      </p>
+
+      <h3 class="md-title-small">2. 更换签名的后果</h3>
+      <p class="md-body-small md-prose">
+        与原手机端配对的应用（含同步器、依赖互联通信的快应用）会拒绝通信，因为通信前会校验签名。
+        已安装的旧版本无法直接升级到新签名的版本，通常需要卸载重装，本地数据会丢失。
+      </p>
+
+      <h3 class="md-title-small">3. 修改包名的后果</h3>
+      <p class="md-body-small md-prose">
+        系统会把它当作一个全新的应用。旧应用的数据目录不会迁移，两者可以并存，也可能出现通知、权限、后台任务的重复注册。
+      </p>
+
+      <h3 class="md-title-small">4. 许可合规由你负责</h3>
+      <p class="md-body-small md-prose">
+        修改与分发受原项目许可证约束。若原项目使用 AGPL 等传染性许可证，分发修改版需要同样以 AGPL 开源，
+        并提供对应源代码；若原项目为专有软件，修改与分发可能违反其最终用户许可协议。
+        本工具不判断、不规避这些约束，是否合规由你自行确认并承担。
+      </p>
+
+      <h3 class="md-title-small">5. 设备风险</h3>
+      <p class="md-body-small md-prose">
+        安装非官方签名的应用、修改系统应用、刷写固件都存在风险，可能导致设备无法启动、数据丢失、保修失效。
+        请自行备份，并确认你了解恢复方式。
+      </p>
+
+      <h3 class="md-title-small">6. 无担保</h3>
+      <p class="md-body-small md-prose">
+        本工具按「现状」提供，不附带任何明示或暗示的担保，包括但不限于适销性、特定用途适用性、准确性、不侵权担保。
+        不保证生成的包一定能被设备接受，不保证签名实现与官方工具逐字节一致。
+      </p>
+
+      <h3 class="md-title-small">7. 责任限制</h3>
+      <p class="md-body-small md-prose">
+        在适用法律允许的最大范围内，作者与贡献者不对因使用或无法使用本工具而产生的任何直接、间接、偶然、特殊、惩罚性损害承担责任，
+        包括但不限于设备损坏、数据丢失、业务中断、利润损失。即使已被告知此类损害的可能性，本条仍然适用。
+      </p>
+
+      <h3 class="md-title-small">8. 备份是你的责任</h3>
+      <p class="md-body-small md-prose">
+        本工具直接修改你选择的文件并生成新文件，不保留原始副本。请在操作前自行备份原始 RPK 与签名私钥。
+      </p>
+
+      <label class="md-consent" data-consent="risk">
+        <input type="checkbox" disabled>
+        <span class="md-consent__box" aria-hidden="true"></span>
+        <span class="md-body-medium">我已理解上述风险，并自行承担使用后果</span>
+      </label>
+
+      <p class="md-gate__end">— 全文结束 —</p>
+    </div>
+  </div>
+
+  <p class="md-gate__warn" id="gateWarn" hidden></p>
+
+  <footer class="md-gate__foot">
+    <button class="md-btn md-btn--text" id="gateDecline" type="button">不同意</button>
+    <button class="md-btn md-btn--filled" id="gateAccept" type="button" disabled>同意并继续</button>
+  </footer>
+</div>
+
+<section class="md-layer" id="historyLayer" data-layer="history" aria-hidden="true">
+  <header class="md-layer__bar">
+    <button class="md-icon-btn" type="button" data-back aria-label="返回">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/>
+      </svg>
+    </button>
+    <h2 class="md-layer__title">历史记录</h2>
+    <button class="md-btn md-btn--text" id="clearHistory" type="button">清空</button>
+  </header>
+  <div class="md-layer__body">
+    <div class="md-layer__inner">
+      <ul class="md-history" id="historyList"></ul>
+      <p class="md-render-state" id="historyEmpty" hidden>还没有记录。载入或导出一次后会出现在这里。</p>
+    </div>
+  </div>
+</section>
+
 <div class="md-snackbar" id="snackbar" role="status" aria-live="polite"></div>
 
-<script src="assets/bundle.js?v=20261024000255" defer></script>
+<script src="assets/bundle.js?v=20261024122219" defer></script>
 </body>
 </html>
