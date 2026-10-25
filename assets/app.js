@@ -2,7 +2,7 @@ import { inspect, repack, createIdentity, importPrivateKey, parseCertificate, sh
 import { readZip, dataOf, crc32 } from './zip.js';
 
 const BUILD = __BUILD__;
-const VERSION = { code: 2400, name: '2.4.0' };
+const VERSION = { code: 2401, name: '2.4.1' };
 
 (function syncVersion() {
   if (window.__PAGE_VERSION__ === BUILD) return;
@@ -59,8 +59,7 @@ const DEFAULT_SETTINGS = {
   barTopPx: 16,
   barNavBlur: false,
   barNavPx: 20,
-  capTop: false,
-  capRadius: 26,
+  roundTop: false,
   barFloat: false,
 };
 
@@ -80,6 +79,7 @@ const S = {
   stale: false,
   lastExport: null,
   settings: { ...DEFAULT_SETTINGS },
+  settingsView: 'main',
   idMode: 'auto',
   tbOs: 'os4',
   tbCatalog: null,
@@ -278,7 +278,6 @@ function loadSettings() {
   };
   S.settings.barTopPx = num(S.settings.barTopPx, 16, 4, 40);
   S.settings.barNavPx = num(S.settings.barNavPx, 20, 4, 40);
-  S.settings.capRadius = num(S.settings.capRadius, 26, 0, 27);
 }
 
 /* ---------- 历史记录 ---------- */
@@ -436,6 +435,7 @@ function setTrack(x, animate) {
 function goTo(index, animate = true) {
   index = clamp(index, 0, PAGES.length - 1);
   S.page = index;
+  if (S.settingsView === 'appearance') closeAppearancePane(true);
   setTrack(-index * pageWidth(), animate);
   for (const b of document.querySelectorAll('.md-nav-item')) {
     b.setAttribute('aria-current', Number(b.dataset.index) === index ? 'page' : 'false');
@@ -584,7 +584,7 @@ function showLayer(name) {
   el.classList.add('is-open');
   el.setAttribute('aria-hidden', 'false');
   hideNavBar();
-  $('backBtn').hidden = false;
+  syncBackBtn();
   history.pushState({ layer: name }, '', location.href);
 }
 
@@ -594,7 +594,7 @@ function hideLayer(name) {
   el.classList.remove('is-open');
   el.setAttribute('aria-hidden', 'true');
   if (S.layer === name) S.layer = null;
-  $('backBtn').hidden = true;
+  syncBackBtn();
   showNavBar();
 }
 
@@ -611,7 +611,14 @@ function closeLayer() {
   }
 }
 
-$('backBtn').addEventListener('click', () => closeLayer());
+function syncBackBtn() {
+  $('backBtn').hidden = !S.layer;
+}
+
+$('backBtn').addEventListener('click', () => {
+  if (S.layer) { closeLayer(); return; }
+  closeAppearancePane();
+});
 
 for (const btn of document.querySelectorAll('.md-layer [data-back]')) {
   btn.addEventListener('click', () => closeLayer());
@@ -621,8 +628,40 @@ window.addEventListener('popstate', () => {
   if (S.layer) {
     const name = S.layer;
     hideLayer(name);
+  } else if (S.settingsView === 'appearance') {
+    closeAppearancePane(true);
   }
 });
+
+/* ---------- 设置 · 外观子页 ---------- */
+
+function openAppearancePane() {
+  if (S.settingsView === 'appearance') return;
+  const page = document.querySelector('.md-page[data-page="settings"]');
+  S.settingsScroll = page ? page.scrollTop : 0;
+  S.settingsView = 'appearance';
+  $('settingsMain').hidden = true;
+  $('appearancePane').hidden = false;
+  $('topTitle').textContent = '顶栏与底栏';
+  syncBackBtn();
+  if (page) page.scrollTop = 0;
+  renderAppearance();
+  history.pushState({ view: 'appearance' }, '', location.href);
+}
+
+function closeAppearancePane(fromPop = false) {
+  if (S.settingsView !== 'appearance') return;
+  S.settingsView = 'main';
+  $('appearancePane').hidden = true;
+  $('settingsMain').hidden = false;
+  $('topTitle').textContent = PAGES[4].label;
+  syncBackBtn();
+  const page = document.querySelector('.md-page[data-page="settings"]');
+  if (page) page.scrollTop = S.settingsScroll || 0;
+  if (!fromPop) {
+    try { history.back(); } catch { }
+  }
+}
 
 /* ---------- 底部弹层 ---------- */
 
@@ -1898,8 +1937,7 @@ const APPEARANCE_DEFAULTS = {
   barTopPx: 16,
   barNavBlur: false,
   barNavPx: 20,
-  capTop: false,
-  capRadius: 26,
+  roundTop: false,
   barFloat: false,
 };
 
@@ -1907,7 +1945,7 @@ function appearanceSummary() {
   const s = S.settings;
   const on = [];
   if (s.barTopBlur) on.push('顶栏模糊');
-  if (s.capTop) on.push('胶囊顶栏');
+  if (s.roundTop) on.push('圆形顶栏');
   if (s.barNavBlur) on.push('底栏模糊');
   if (s.barFloat) on.push('悬浮底栏');
   return on.length ? on.join(' · ') : '全部关闭';
@@ -1926,25 +1964,14 @@ function applyAppearance() {
   const blurTop = s.barTopBlur && s.barTopPx > 0;
   const blurNav = s.barNavBlur && s.barNavPx > 0;
   const root = document.documentElement;
-  const pv = $('apPreview');
 
   document.body.classList.toggle('has-top-blur', blurTop);
   document.body.classList.toggle('has-nav-blur', blurNav);
-  document.body.classList.toggle('top-capsule', Boolean(s.capTop));
+  document.body.classList.toggle('top-round', Boolean(s.roundTop));
   document.body.classList.toggle('nav-floating', Boolean(s.barFloat));
 
   root.style.setProperty('--top-blur', `${s.barTopPx}px`);
   root.style.setProperty('--nav-blur', `${s.barNavPx}px`);
-  root.style.setProperty('--cap-radius', `${s.capRadius}px`);
-
-  if (!pv) return;
-  pv.classList.toggle('is-blur-top', blurTop);
-  pv.classList.toggle('is-blur-nav', blurNav);
-  pv.classList.toggle('is-cap', Boolean(s.capTop));
-  pv.classList.toggle('is-float', Boolean(s.barFloat));
-  pv.style.setProperty('--pv-blur-top', `${(s.barTopPx * 0.5).toFixed(1)}px`);
-  pv.style.setProperty('--pv-blur-nav', `${(s.barNavPx * 0.5).toFixed(1)}px`);
-  pv.style.setProperty('--pv-radius', `${s.capRadius}px`);
 }
 
 function renderAppearance() {
@@ -1952,29 +1979,24 @@ function renderAppearance() {
 
   $('apTopBlur').checked = s.barTopBlur;
   $('apNavBlur').checked = s.barNavBlur;
-  $('apCapTop').checked = s.capTop;
+  $('apRoundTop').checked = s.roundTop;
   $('apFloatNav').checked = s.barFloat;
 
   $('apTopPx').value = s.barTopPx;
   $('apNavPx').value = s.barNavPx;
-  $('apRadius').value = s.capRadius;
 
   $('apTopPx').disabled = !s.barTopBlur;
   $('apNavPx').disabled = !s.barNavBlur;
-  $('apRadius').disabled = !s.capTop;
 
   $('apTopPxSlot').classList.toggle('is-off', !s.barTopBlur);
   $('apNavPxSlot').classList.toggle('is-off', !s.barNavBlur);
-  $('apRadiusSlot').classList.toggle('is-off', !s.capTop);
 
   $('apTopPxVal').textContent = `${s.barTopPx} px`;
   $('apNavPxVal').textContent = `${s.barNavPx} px`;
-  $('apRadiusVal').textContent = s.capRadius >= 27 ? '完全' : `${s.capRadius} px`;
-  $('apTopChip').textContent = s.capTop ? '胶囊' : '标准';
+  $('apTopChip').textContent = s.roundTop ? '圆形' : '标准';
 
   paintSlider($('apTopPx'));
   paintSlider($('apNavPx'));
-  paintSlider($('apRadius'));
 
   applyAppearance();
 }
@@ -2347,12 +2369,10 @@ $('openStorage').addEventListener('click', async () => {
 $('openTerms').addEventListener('click', () => openGate('view'));
 
 /* 顶栏与底栏 */
-$('openAppearance').addEventListener('click', () => {
-  renderAppearance();
-  openLayer('appearance');
-});
+$('openAppearance').addEventListener('click', () => openAppearancePane());
+$('apBack').addEventListener('click', () => closeAppearancePane());
 
-for (const [id, key] of [['apTopBlur', 'barTopBlur'], ['apNavBlur', 'barNavBlur'], ['apCapTop', 'capTop'], ['apFloatNav', 'barFloat']]) {
+for (const [id, key] of [['apTopBlur', 'barTopBlur'], ['apNavBlur', 'barNavBlur'], ['apRoundTop', 'roundTop'], ['apFloatNav', 'barFloat']]) {
   $(id).addEventListener('change', e => {
     S.settings[key] = e.target.checked;
     saveSettings();
@@ -2361,7 +2381,7 @@ for (const [id, key] of [['apTopBlur', 'barTopBlur'], ['apNavBlur', 'barNavBlur'
   });
 }
 
-for (const [id, key] of [['apTopPx', 'barTopPx'], ['apNavPx', 'barNavPx'], ['apRadius', 'capRadius']]) {
+for (const [id, key] of [['apTopPx', 'barTopPx'], ['apNavPx', 'barNavPx']]) {
   $(id).addEventListener('input', e => {
     S.settings[key] = Number(e.target.value);
     renderAppearance();

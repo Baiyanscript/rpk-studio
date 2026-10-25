@@ -7,11 +7,11 @@
 <link rel="icon" href="data:,">
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
-<link rel="stylesheet" href="assets/md3.css?v=20261025164551">
+<link rel="stylesheet" href="assets/md3.css?v=20261025173253">
 </head>
 <body>
 <div id="fatal" class="md-fatal" hidden></div>
-<script>window.__PAGE_VERSION__ = '20261025164551';</script>
+<script>window.__PAGE_VERSION__ = '20261025173253';</script>
 <script>
 window.addEventListener('error', function (e) {
   var bar = document.getElementById('fatal');
@@ -28,6 +28,11 @@ window.addEventListener('error', function (e) {
     </svg>
   </button>
   <h1 class="md-top-bar__title" id="topTitle">RPK Studio</h1>
+  <svg class="md-top-bar__mark" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+    <path class="md-top-bar__face md-top-bar__face--top" d="M12 2.4 21 7.4 12 12.4 3 7.4Z"/>
+    <path class="md-top-bar__face md-top-bar__face--left" d="M3 8.9 11.2 13.4V21.5L3 17Z"/>
+    <path class="md-top-bar__face md-top-bar__face--right" d="M21 8.9 12.8 13.4V21.5L21 17Z"/>
+  </svg>
 </header>
 
 <div class="md-shell">
@@ -279,6 +284,7 @@ window.addEventListener('error', function (e) {
       <!-- 设置 -->
       <section class="md-page" data-page="settings">
         <div class="md-page__inner">
+          <div class="md-stack" id="settingsMain">
           <div class="md-card md-card--outlined md-stack">
             <div class="md-card__head"><span class="md-title-medium">主题</span></div>
             <div class="md-segmented" id="themeSeg" role="group" aria-label="主题">
@@ -340,7 +346,7 @@ window.addEventListener('error', function (e) {
             <div class="md-card__head"><span class="md-title-medium">关于</span></div>
             <dl class="md-kv">
               <dt>作者</dt><dd>hrk_</dd>
-              <dt>版本</dt><dd id="aboutVersion">2.4.0 · Material 3</dd>
+              <dt>版本</dt><dd id="aboutVersion">2.4.1 · Material 3</dd>
               <dt>签名格式</dt><dd>RPK Sig Block 42</dd>
               <dt>算法</dt><dd>RSA-2048 / SHA-256</dd>
             </dl>
@@ -348,6 +354,118 @@ window.addEventListener('error', function (e) {
               <a class="md-btn md-btn--text" href="https://github.com/hrk666666/rpk-studio" target="_blank" rel="noopener">源码</a>
               <a class="md-btn md-btn--text" href="https://github.com/hrk666666/rpk-studio/blob/main/LICENSE" target="_blank" rel="noopener">MIT 许可</a>
             </div>
+          </div>
+          </div>
+
+          <div class="md-stack" id="appearancePane" hidden>
+            <div class="md-subpage">
+              <button class="md-subpage__back" id="apBack" type="button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4L10.8 12z"/>
+                </svg>
+                <span>设置</span>
+              </button>
+              <h2 class="md-headline-small">顶栏与底栏</h2>
+              <p class="md-body-small md-muted">改动即时生效，往下滚动可看效果</p>
+            </div>
+
+            <div class="md-card md-card--outlined">
+              <div class="md-card__head">
+                <span class="md-title-medium">顶栏</span>
+                <span class="md-chip" id="apTopChip">标准</span>
+              </div>
+
+              <label class="md-switch-row md-switch-row--tight">
+                <span>
+                  <span class="md-body-medium">模糊顶栏</span>
+                  <span class="md-body-small md-muted md-block">内容滑到栏下时透出模糊</span>
+                </span>
+                <span class="md-switch">
+                  <input type="checkbox" id="apTopBlur">
+                  <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+                </span>
+              </label>
+
+              <div class="md-slot" id="apTopPxSlot">
+                <div class="md-slot__head">
+                  <span class="md-label-medium md-muted">模糊度</span>
+                  <span class="md-label-medium md-slot__val" id="apTopPxVal">16 px</span>
+                </div>
+                <input class="md-slider md-slider--fill" type="range" id="apTopPx" min="4" max="40" step="1" value="16" aria-label="顶栏模糊度">
+              </div>
+
+              <div class="md-divider"></div>
+
+              <label class="md-switch-row md-switch-row--tight">
+                <span>
+                  <span class="md-body-medium">圆形顶栏</span>
+                  <span class="md-body-small md-muted md-block">标题换成圆形徽标，悬浮在内容上</span>
+                </span>
+                <span class="md-switch">
+                  <input type="checkbox" id="apRoundTop">
+                  <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+                </span>
+              </label>
+            </div>
+
+            <div class="md-card md-card--outlined">
+              <div class="md-card__head">
+                <span class="md-title-medium">底栏</span>
+                <span class="md-chip">窄屏</span>
+              </div>
+
+              <label class="md-switch-row md-switch-row--tight">
+                <span>
+                  <span class="md-body-medium">模糊底栏</span>
+                  <span class="md-body-small md-muted md-block">滚动时底栏半透明</span>
+                </span>
+                <span class="md-switch">
+                  <input type="checkbox" id="apNavBlur">
+                  <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+                </span>
+              </label>
+
+              <div class="md-slot" id="apNavPxSlot">
+                <div class="md-slot__head">
+                  <span class="md-label-medium md-muted">模糊度</span>
+                  <span class="md-label-medium md-slot__val" id="apNavPxVal">20 px</span>
+                </div>
+                <input class="md-slider md-slider--fill" type="range" id="apNavPx" min="4" max="40" step="1" value="20" aria-label="底栏模糊度">
+              </div>
+
+              <div class="md-divider"></div>
+
+              <label class="md-switch-row md-switch-row--tight">
+                <span>
+                  <span class="md-body-medium">悬浮底栏</span>
+                  <span class="md-body-small md-muted md-block">离开屏幕边缘的长胶囊</span>
+                </span>
+                <span class="md-switch">
+                  <input type="checkbox" id="apFloatNav">
+                  <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
+                </span>
+              </label>
+
+              <p class="md-body-small md-muted" id="apNavNote">底栏只在窄屏出现；宽屏使用左侧导航。</p>
+            </div>
+
+            <button class="md-btn md-btn--text md-btn--block" id="apReset" type="button">恢复默认</button>
+
+            <div class="md-demo">
+              <div class="md-demo__head">
+                <span class="md-title-medium">滚动测试</span>
+                <span class="md-body-small md-muted">不是设置项</span>
+              </div>
+              <p class="md-demo__line md-demo__line--1">洋红文字，滑过顶栏时看模糊。</p>
+              <p class="md-demo__line md-demo__line--2">青蓝文字，停在底栏上方。</p>
+              <p class="md-demo__line md-demo__line--3">橙黄文字，用来对比强度。</p>
+              <div class="md-demo__tiles"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="md-demo__band md-demo__band--1">渐变色块 01</div>
+              <div class="md-demo__band md-demo__band--2">渐变色块 02</div>
+              <div class="md-demo__tall"><span>继续往下</span></div>
+            </div>
+
+            <div class="md-tail" aria-hidden="true"></div>
           </div>
         </div>
       </section>
@@ -524,121 +642,6 @@ window.addEventListener('error', function (e) {
   </div>
 </section>
 
-<!-- 设置：顶栏与底栏 -->
-<section class="md-layer" id="appearanceLayer" data-layer="appearance" aria-hidden="true">
-  <header class="md-layer__bar">
-    <button class="md-icon-btn" type="button" data-back aria-label="返回">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/>
-      </svg>
-    </button>
-    <div class="md-layer__titles">
-      <h2 class="md-layer__title">顶栏与底栏</h2>
-      <p class="md-body-small md-muted">只影响界面，不改动包</p>
-    </div>
-  </header>
-
-  <div class="md-layer__body">
-    <div class="md-layer__inner">
-      <div class="md-preview" id="apPreview" aria-hidden="true">
-        <div class="md-preview__cards"><i></i><i></i><i></i></div>
-        <div class="md-preview__top"><span id="apPvTitle">RPK Studio</span></div>
-        <div class="md-preview__nav"><i></i><i></i><i></i><i></i><i></i></div>
-      </div>
-
-      <div class="md-card md-card--outlined">
-        <div class="md-card__head">
-          <span class="md-title-medium">顶栏</span>
-          <span class="md-chip" id="apTopChip">标准</span>
-        </div>
-
-        <label class="md-switch-row md-switch-row--tight">
-          <span>
-            <span class="md-body-medium">模糊顶栏</span>
-            <span class="md-body-small md-muted md-block">内容滑到栏下时透出模糊</span>
-          </span>
-          <span class="md-switch">
-            <input type="checkbox" id="apTopBlur">
-            <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
-          </span>
-        </label>
-
-        <div class="md-slot" id="apTopPxSlot">
-          <div class="md-slot__head">
-            <span class="md-label-medium md-muted">模糊度</span>
-            <span class="md-label-medium md-slot__val" id="apTopPxVal">16 px</span>
-          </div>
-          <input class="md-slider md-slider--fill" type="range" id="apTopPx" min="4" max="40" step="1" value="16" aria-label="顶栏模糊度">
-        </div>
-
-        <div class="md-divider"></div>
-
-        <label class="md-switch-row md-switch-row--tight">
-          <span>
-            <span class="md-body-medium">胶囊顶栏</span>
-            <span class="md-body-small md-muted md-block">只包住标题，悬浮在内容之上</span>
-          </span>
-          <span class="md-switch">
-            <input type="checkbox" id="apCapTop">
-            <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
-          </span>
-        </label>
-
-        <div class="md-slot" id="apRadiusSlot">
-          <div class="md-slot__head">
-            <span class="md-label-medium md-muted">圆角</span>
-            <span class="md-label-medium md-slot__val" id="apRadiusVal">26 px</span>
-          </div>
-          <input class="md-slider md-slider--fill" type="range" id="apRadius" min="0" max="27" step="1" value="26" aria-label="胶囊圆角">
-        </div>
-      </div>
-
-      <div class="md-card md-card--outlined">
-        <div class="md-card__head">
-          <span class="md-title-medium">底栏</span>
-          <span class="md-chip">窄屏</span>
-        </div>
-
-        <label class="md-switch-row md-switch-row--tight">
-          <span>
-            <span class="md-body-medium">模糊底栏</span>
-            <span class="md-body-small md-muted md-block">滚动时底栏半透明</span>
-          </span>
-          <span class="md-switch">
-            <input type="checkbox" id="apNavBlur">
-            <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
-          </span>
-        </label>
-
-        <div class="md-slot" id="apNavPxSlot">
-          <div class="md-slot__head">
-            <span class="md-label-medium md-muted">模糊度</span>
-            <span class="md-label-medium md-slot__val" id="apNavPxVal">20 px</span>
-          </div>
-          <input class="md-slider md-slider--fill" type="range" id="apNavPx" min="4" max="40" step="1" value="20" aria-label="底栏模糊度">
-        </div>
-
-        <div class="md-divider"></div>
-
-        <label class="md-switch-row md-switch-row--tight">
-          <span>
-            <span class="md-body-medium">悬浮底栏</span>
-            <span class="md-body-small md-muted md-block">离开屏幕边缘的长胶囊</span>
-          </span>
-          <span class="md-switch">
-            <input type="checkbox" id="apFloatNav">
-            <span class="md-switch__track"><span class="md-switch__thumb"></span></span>
-          </span>
-        </label>
-
-        <p class="md-body-small md-muted" id="apNavNote">底栏只在窄屏出现；宽屏使用左侧导航。</p>
-      </div>
-
-      <button class="md-btn md-btn--text md-btn--block" id="apReset" type="button">恢复默认</button>
-    </div>
-  </div>
-</section>
-
 <div class="md-scrim" id="sheetScrim" hidden></div>
 <div class="md-bottom-sheet" id="sheet" role="dialog" aria-modal="true" aria-hidden="true">
   <div class="md-bottom-sheet__handle"></div>
@@ -705,6 +708,6 @@ window.addEventListener('error', function (e) {
 
 <div class="md-snackbar" id="snackbar" role="status" aria-live="polite"></div>
 
-<script src="assets/bundle.js?v=20261025164551" defer></script>
+<script src="assets/bundle.js?v=20261025173253" defer></script>
 </body>
 </html>
