@@ -1754,3 +1754,255 @@ body.sheet-open .md-page { overflow-y: hidden; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ============================================================
+   界面 · 模糊栏 / 悬浮底栏 / 胶囊顶栏
+   ============================================================ */
+
+:root {
+  --top-blur: 0px;
+  --nav-blur: 0px;
+  --cap-radius: 26px;
+}
+
+/* ---------- 模糊 ---------- */
+
+body.has-top-blur .md-top-bar {
+  background: color-mix(in srgb, var(--md-surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(var(--top-blur)) saturate(1.6);
+  backdrop-filter: blur(var(--top-blur)) saturate(1.6);
+}
+
+body.has-nav-blur .md-nav-bar {
+  background: color-mix(in srgb, var(--md-surface-2) 72%, transparent);
+  -webkit-backdrop-filter: blur(var(--nav-blur)) saturate(1.6);
+  backdrop-filter: blur(var(--nav-blur)) saturate(1.6);
+  border-top-color: color-mix(in srgb, var(--md-outline-variant) 45%, transparent);
+}
+
+/* ---------- 胶囊顶栏 ---------- */
+
+body.top-capsule .md-top-bar {
+  top: calc(6px + env(safe-area-inset-top, 0px));
+  left: 14px;
+  right: auto;
+  width: max-content;
+  max-width: calc(100% - 28px);
+  height: 54px;
+  padding: 0 20px 0 14px;
+  border-radius: var(--cap-radius);
+  background: var(--md-surface-3);
+  box-shadow: var(--md-elev-2);
+}
+
+body.top-capsule .md-top-bar__title {
+  flex: 0 1 auto;
+  font-size: 19px;
+  line-height: 26px;
+}
+
+body.top-capsule.has-top-blur .md-top-bar {
+  background: color-mix(in srgb, var(--md-surface-3) 74%, transparent);
+}
+
+body.top-capsule .md-top-bar.is-hidden { transform: translateY(calc(-100% - 16px)); }
+
+@media (max-width: 400px) {
+  body.top-capsule .md-top-bar { left: 12px; max-width: calc(100% - 24px); }
+}
+
+@media (min-width: 600px) {
+  /* 与标准顶栏的标题左边缘对齐 */
+  body.top-capsule .md-top-bar {
+    left: calc(88px + max(28px, (100vw - 968px) / 2 + 28px));
+    max-width: calc(100vw - 88px - 56px);
+  }
+}
+
+/* ---------- 悬浮底栏 ---------- */
+
+body.nav-floating .md-nav-bar {
+  left: 10px;
+  right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  height: 68px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
+  border-radius: var(--r-full);
+  background: var(--md-surface-3);
+  box-shadow: var(--md-elev-2);
+}
+
+body.nav-floating.has-nav-blur .md-nav-bar {
+  background: color-mix(in srgb, var(--md-surface-3) 76%, transparent);
+  border-color: color-mix(in srgb, var(--md-outline-variant) 40%, transparent);
+}
+
+body.nav-floating .md-nav-item { height: 56px; }
+body.nav-floating .md-nav-item__icon { width: min(54px, 100%); }
+body.nav-floating .md-nav-bar.is-hidden { transform: translateY(calc(100% + 16px)); }
+
+/* ---------- 设置项：带数值的滑杆 ---------- */
+
+.md-slot { padding: 4px 0 8px; }
+
+.md-slot__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0 0;
+}
+
+.md-slot__val { color: var(--md-on-surface-variant); font-variant-numeric: tabular-nums; }
+.md-slot.is-off { opacity: .45; }
+
+.md-slider--fill::-webkit-slider-runnable-track {
+  background:
+    linear-gradient(to right,
+      var(--md-primary) 0 var(--p, 0%),
+      var(--md-surface-4) var(--p, 0%) 100%);
+}
+
+.md-slider--fill::-moz-range-track { background: var(--md-surface-4); }
+.md-slider--fill::-moz-range-progress {
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--md-primary);
+}
+
+.md-slider:disabled { opacity: .38; cursor: default; }
+.md-slider:disabled::-webkit-slider-thumb { background: var(--md-on-surface); }
+
+/* ---------- 预览 ---------- */
+
+.md-preview {
+  position: relative;
+  height: 176px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--md-outline-variant);
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(120% 95% at 6% 0%, color-mix(in srgb, var(--md-primary) 50%, transparent), transparent 62%),
+    radial-gradient(95% 80% at 100% 24%, color-mix(in srgb, var(--md-tertiary-container) 95%, transparent), transparent 66%),
+    radial-gradient(95% 95% at 52% 112%, color-mix(in srgb, var(--md-secondary-container) 95%, transparent), transparent 72%),
+    var(--md-surface-1);
+}
+
+.md-preview__cards {
+  position: absolute;
+  inset: 14px 12px 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.md-preview__cards i {
+  display: block;
+  height: 20px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--md-surface) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-surface) 34%, transparent);
+}
+
+.md-preview__cards i:nth-child(2) { height: 32px; }
+.md-preview__cards i:nth-child(3) { height: 16px; width: 62%; }
+
+.md-preview__top {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  font-size: 10.5px;
+  letter-spacing: .2px;
+  transition: background .2s, border-radius .22s var(--ease), width .22s var(--ease), box-shadow .2s;
+}
+
+.md-preview__top span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.md-preview.is-cap .md-preview__top {
+  right: auto;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  padding: 0 12px;
+  border-radius: calc(var(--pv-radius, 26px) * .55);
+  background: var(--md-surface-3);
+  box-shadow: var(--md-elev-1);
+}
+
+.md-preview.is-blur-top .md-preview__top {
+  background: color-mix(in srgb, var(--md-surface) 58%, transparent);
+  -webkit-backdrop-filter: blur(var(--pv-blur-top, 8px)) saturate(1.6);
+  backdrop-filter: blur(var(--pv-blur-top, 8px)) saturate(1.6);
+}
+
+.md-preview.is-cap.is-blur-top .md-preview__top {
+  background: color-mix(in srgb, var(--md-surface-3) 66%, transparent);
+}
+
+.md-preview__nav {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: var(--md-surface-2);
+  border-top: 1px solid var(--md-outline-variant);
+  transition: background .2s, border-radius .22s var(--ease), left .22s var(--ease), right .22s var(--ease), bottom .22s var(--ease), box-shadow .2s;
+}
+
+.md-preview__nav i {
+  width: 15px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--md-on-surface-variant);
+  opacity: .4;
+}
+
+.md-preview__nav i:first-child { background: var(--md-primary); opacity: 1; }
+
+.md-preview.is-float .md-preview__nav {
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  height: 26px;
+  padding: 0 8px;
+  border-top: 0;
+  border-radius: var(--r-full);
+  background: var(--md-surface-3);
+  box-shadow: var(--md-elev-1);
+}
+
+.md-preview.is-blur-nav .md-preview__nav {
+  background: color-mix(in srgb, var(--md-surface-2) 58%, transparent);
+  -webkit-backdrop-filter: blur(var(--pv-blur-nav, 10px)) saturate(1.6);
+  backdrop-filter: blur(var(--pv-blur-nav, 10px)) saturate(1.6);
+}
+
+.md-preview.is-float.is-blur-nav .md-preview__nav {
+  background: color-mix(in srgb, var(--md-surface-3) 66%, transparent);
+}
+
+/* 不支持背景模糊时退回不透明背景，保证可读性 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  body.has-top-blur .md-top-bar { background: var(--md-surface); }
+  body.top-capsule.has-top-blur .md-top-bar { background: var(--md-surface-3); }
+  body.has-nav-blur .md-nav-bar { background: var(--md-surface-2); }
+  body.nav-floating.has-nav-blur .md-nav-bar { background: var(--md-surface-3); }
+}

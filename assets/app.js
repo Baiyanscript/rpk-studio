@@ -2,7 +2,7 @@ import { inspect, repack, createIdentity, importPrivateKey, parseCertificate, sh
 import { readZip, dataOf, crc32 } from './zip.js';
 
 const BUILD = __BUILD__;
-const VERSION = { code: 2300, name: '2.3.0' };
+const VERSION = { code: 2400, name: '2.4.0' };
 
 (function syncVersion() {
   if (window.__PAGE_VERSION__ === BUILD) return;
@@ -55,6 +55,13 @@ const DEFAULT_SETTINGS = {
   autoIdentity: true,
   updAuto: true,
   updMirror: '',
+  barTopBlur: false,
+  barTopPx: 16,
+  barNavBlur: false,
+  barNavPx: 20,
+  capTop: false,
+  capRadius: 26,
+  barFloat: false,
 };
 
 const S = {
@@ -265,6 +272,13 @@ function loadSettings() {
   } catch {
     S.settings = { ...DEFAULT_SETTINGS };
   }
+  const num = (v, d, a, b) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? clamp(n, a, b) : d;
+  };
+  S.settings.barTopPx = num(S.settings.barTopPx, 16, 4, 40);
+  S.settings.barNavPx = num(S.settings.barNavPx, 20, 4, 40);
+  S.settings.capRadius = num(S.settings.capRadius, 26, 0, 27);
 }
 
 /* ---------- 历史记录 ---------- */
@@ -413,6 +427,8 @@ function pageWidth() {
 
 function setTrack(x, animate) {
   const track = $('track');
+  const pager = $('pager');
+  if (pager.scrollLeft) pager.scrollLeft = 0;
   track.style.transition = animate ? 'transform .34s cubic-bezier(.2, 0, 0, 1)' : 'none';
   track.style.transform = `translate3d(${x}px, 0, 0)`;
 }
@@ -596,6 +612,10 @@ function closeLayer() {
 }
 
 $('backBtn').addEventListener('click', () => closeLayer());
+
+for (const btn of document.querySelectorAll('.md-layer [data-back]')) {
+  btn.addEventListener('click', () => closeLayer());
+}
 
 window.addEventListener('popstate', () => {
   if (S.layer) {
@@ -1867,7 +1887,96 @@ function renderSettingsPage() {
   $('stIdentity').checked = S.settings.autoIdentity;
   $('optVerify').checked = S.settings.optVerify;
   $('optWatch').checked = S.settings.optWatch;
+  $('appearanceHint').textContent = appearanceSummary();
   updateStorageHint();
+}
+
+/* ---------- 顶栏与底栏 ---------- */
+
+const APPEARANCE_DEFAULTS = {
+  barTopBlur: false,
+  barTopPx: 16,
+  barNavBlur: false,
+  barNavPx: 20,
+  capTop: false,
+  capRadius: 26,
+  barFloat: false,
+};
+
+function appearanceSummary() {
+  const s = S.settings;
+  const on = [];
+  if (s.barTopBlur) on.push('顶栏模糊');
+  if (s.capTop) on.push('胶囊顶栏');
+  if (s.barNavBlur) on.push('底栏模糊');
+  if (s.barFloat) on.push('悬浮底栏');
+  return on.length ? on.join(' · ') : '全部关闭';
+}
+
+function paintSlider(input) {
+  const min = Number(input.min) || 0;
+  const max = Number(input.max) || 100;
+  const v = Number(input.value);
+  const p = max > min ? ((v - min) / (max - min)) * 100 : 0;
+  input.style.setProperty('--p', `${p.toFixed(2)}%`);
+}
+
+function applyAppearance() {
+  const s = S.settings;
+  const blurTop = s.barTopBlur && s.barTopPx > 0;
+  const blurNav = s.barNavBlur && s.barNavPx > 0;
+  const root = document.documentElement;
+  const pv = $('apPreview');
+
+  document.body.classList.toggle('has-top-blur', blurTop);
+  document.body.classList.toggle('has-nav-blur', blurNav);
+  document.body.classList.toggle('top-capsule', Boolean(s.capTop));
+  document.body.classList.toggle('nav-floating', Boolean(s.barFloat));
+
+  root.style.setProperty('--top-blur', `${s.barTopPx}px`);
+  root.style.setProperty('--nav-blur', `${s.barNavPx}px`);
+  root.style.setProperty('--cap-radius', `${s.capRadius}px`);
+
+  if (!pv) return;
+  pv.classList.toggle('is-blur-top', blurTop);
+  pv.classList.toggle('is-blur-nav', blurNav);
+  pv.classList.toggle('is-cap', Boolean(s.capTop));
+  pv.classList.toggle('is-float', Boolean(s.barFloat));
+  pv.style.setProperty('--pv-blur-top', `${(s.barTopPx * 0.5).toFixed(1)}px`);
+  pv.style.setProperty('--pv-blur-nav', `${(s.barNavPx * 0.5).toFixed(1)}px`);
+  pv.style.setProperty('--pv-radius', `${s.capRadius}px`);
+}
+
+function renderAppearance() {
+  const s = S.settings;
+
+  $('apTopBlur').checked = s.barTopBlur;
+  $('apNavBlur').checked = s.barNavBlur;
+  $('apCapTop').checked = s.capTop;
+  $('apFloatNav').checked = s.barFloat;
+
+  $('apTopPx').value = s.barTopPx;
+  $('apNavPx').value = s.barNavPx;
+  $('apRadius').value = s.capRadius;
+
+  $('apTopPx').disabled = !s.barTopBlur;
+  $('apNavPx').disabled = !s.barNavBlur;
+  $('apRadius').disabled = !s.capTop;
+
+  $('apTopPxSlot').classList.toggle('is-off', !s.barTopBlur);
+  $('apNavPxSlot').classList.toggle('is-off', !s.barNavBlur);
+  $('apRadiusSlot').classList.toggle('is-off', !s.capTop);
+
+  $('apTopPxVal').textContent = `${s.barTopPx} px`;
+  $('apNavPxVal').textContent = `${s.barNavPx} px`;
+  $('apRadiusVal').textContent = s.capRadius >= 27 ? '完全' : `${s.capRadius} px`;
+  $('apTopChip').textContent = s.capTop ? '胶囊' : '标准';
+
+  paintSlider($('apTopPx'));
+  paintSlider($('apNavPx'));
+  paintSlider($('apRadius'));
+
+  applyAppearance();
 }
 
 /* ---------- 更新检查 ---------- */
@@ -2032,12 +2141,14 @@ buildNav();
 
 const savedTheme = (() => { try { return localStorage.getItem('rpk-theme') || S.settings.theme; } catch { return S.settings.theme; } })();
 applyTheme(savedTheme);
+applyAppearance();
 renderKV();
 renderVerify();
 renderImages();
 renderForm();
 renderIdentity();
 renderSettingsPage();
+renderAppearance();
 renderHistory();
 initConsent();
 restoreIdentity().then(() => updateStorageHint());
@@ -2234,6 +2345,40 @@ $('openStorage').addEventListener('click', async () => {
   openLayer('storage');
 });
 $('openTerms').addEventListener('click', () => openGate('view'));
+
+/* 顶栏与底栏 */
+$('openAppearance').addEventListener('click', () => {
+  renderAppearance();
+  openLayer('appearance');
+});
+
+for (const [id, key] of [['apTopBlur', 'barTopBlur'], ['apNavBlur', 'barNavBlur'], ['apCapTop', 'capTop'], ['apFloatNav', 'barFloat']]) {
+  $(id).addEventListener('change', e => {
+    S.settings[key] = e.target.checked;
+    saveSettings();
+    renderAppearance();
+    renderSettingsPage();
+  });
+}
+
+for (const [id, key] of [['apTopPx', 'barTopPx'], ['apNavPx', 'barNavPx'], ['apRadius', 'capRadius']]) {
+  $(id).addEventListener('input', e => {
+    S.settings[key] = Number(e.target.value);
+    renderAppearance();
+  });
+  $(id).addEventListener('change', () => {
+    saveSettings();
+    renderSettingsPage();
+  });
+}
+
+$('apReset').addEventListener('click', () => {
+  Object.assign(S.settings, APPEARANCE_DEFAULTS);
+  saveSettings();
+  renderAppearance();
+  renderSettingsPage();
+  snack('已恢复默认');
+});
 
 $('stRecord').addEventListener('change', e => { S.settings.record = e.target.checked; saveSettings(); });
 $('stFiles').addEventListener('change', e => { S.settings.storeFiles = e.target.checked; saveSettings(); });
