@@ -2,5 +2,7 @@
   "versionCode": 2401,
   "versionName": "2.4.1",
   "notes": "胶囊顶栏改为圆形顶栏：标题换成圆形立方体徽标，可叠加模糊；外观设置改为页内子页，用真实顶栏底栏做预览，底部新增彩色滚动测试内容与色带。",
-  "url": "https://github.com/hrk666666/rpk-studio/releases"
+  "url": "https://github.com/hrk666666/rpk-studio/releases/tag/v2.4.1",
+  "apk": "https://github.com/hrk666666/rpk-studio/releases/download/v2.4.1/RPK-Studio-2.4.1.apk",
+  "size": "11.6 MB"
 }

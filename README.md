@@ -5,6 +5,22 @@
 在线版：**https://hrk666666.github.io/rpk-studio/**
 作者：**hrk_**
 
+## 安装包
+
+Android 版在 [Releases](https://github.com/hrk666666/rpk-studio/releases) 提供。
+
+| 项 | 值 |
+|---|---|
+| 版本 | 2.4.1（versionCode 2004001） |
+| 大小 | 11.6 MB |
+| 架构 | arm64-v8a、armeabi-v7a（通用包） |
+| 系统 | Android 7.0 起（minSdk 24） |
+| 包名 | `io.github.hrk666666.rpkstudio` |
+
+界面与网页版同一套，离线可用。外壳用系统 WebView，不内置浏览器内核。
+
+签名证书 SHA-256：`3B:79:9B:01:A8:54:B3:17:0F:D3:C0:BC:A5:BE:01:76:B1:4A:6B:DA:2D:5E:EC:33:A7:3B:6F:FF:B9:66:A8:ED`
+
 ## 结构
 
 五个主页面，桌面左侧导航，手机底部导航，可左右滑动切换：
