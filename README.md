@@ -3,6 +3,7 @@
 浏览器里解析、修改并重新签名 Vela 平台的 RPK 分发包。全部计算在本机完成，文件不上传。
 
 在线版：**https://hrk666666.github.io/rpk-studio/**
+产品介绍页：**https://hrk666666.github.io/rpk-studio/intro.html**
 作者：**hrk_**
 
 ## 安装包
